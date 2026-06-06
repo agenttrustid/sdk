@@ -7,8 +7,8 @@ Official client SDKs for [AgentTrust ID](https://agenttrust.id) — authenticati
 | Python | `pip install agenttrustid` | [python/](python/) | [SDK Guide](https://agenttrust.id/docs) |
 | TypeScript | `npm install @agenttrustid/sdk` | [typescript/](typescript/) | [SDK Guide](https://agenttrust.id/docs) |
 | Go | `go get github.com/agenttrustid/sdk/go` | [go/](go/) | [pkg.go.dev](https://pkg.go.dev/github.com/agenttrustid/sdk/go) |
-| Java | Maven/Gradle `id.agenttrust:agenttrustid` | [java/](java/) | [SDK Guide](https://agenttrust.id/docs) |
-| Rust | `cargo add agenttrustid` | [rust/](rust/) | [docs.rs](https://docs.rs/agenttrustid) |
+| Java | build from source (Maven Central soon) | [java/](java/) | [SDK Guide](https://agenttrust.id/docs) |
+| Rust | build from source (crates.io soon) | [rust/](rust/) | [SDK Guide](https://agenttrust.id/docs) |
 
 Every SDK covers the same core surface: agent registration, opaque token issue/introspect/revoke, pre-flight action checks through Fast Guard, and telemetry reporting. Each directory has its own README with a quick start and full API reference.
 
@@ -18,4 +18,4 @@ SDKs are versioned independently with per-language tags: `python/v0.3.0`, `types
 
 ## License
 
-Apache License 2.0 — see the LICENSE file in each SDK directory.
+[Apache License 2.0](LICENSE). Each SDK directory also carries its own copy for packaging.
