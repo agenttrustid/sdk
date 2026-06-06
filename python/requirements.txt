@@ -1,0 +1,3 @@
+# Runtime dependencies are declared in pyproject.toml.
+# The Python SDK is stdlib-only at runtime; this file is intentionally empty
+# so Safety scans the SDK dependency surface instead of the scanner environment.

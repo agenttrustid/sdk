@@ -1,0 +1,32 @@
+[package]
+name = "agenttrustid"
+version = "0.3.0"
+edition = "2021"
+description = "AgentTrust ID SDK — runtime authorization, opaque agent tokens, and Guardian checks for AI agents"
+license = "Apache-2.0"
+repository = "https://github.com/agenttrustid/sdk"
+homepage = "https://agenttrust.id"
+documentation = "https://docs.rs/agenttrustid"
+readme = "README.md"
+keywords = ["ai", "agents", "security", "authorization", "mcp"]
+categories = ["authentication", "api-bindings"]
+authors = ["AgentTrust <contact@agenttrust.id>"]
+rust-version = "1.74"
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+mockito = "1"
+
+[features]
+default = ["blocking"]
+blocking = ["reqwest/blocking"]
+async = ["tokio", "reqwest/default-tls"]
