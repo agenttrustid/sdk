@@ -40,9 +40,11 @@ jobs:
         run: python -m build
 
       - name: Publish to PyPI
+        # Tokenless: PyPI Trusted Publishing (OIDC). The pending publisher on
+        # PyPI is registered for agenttrustid/sdk + release.yml; the action
+        # exchanges the job's id-token for a publish credential automatically.
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: python/dist/
 
   publish-ts-sdk:
