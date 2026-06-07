@@ -1,6 +1,6 @@
-# AgentTrust Java SDK
+# AgentTrust ID Java SDK
 
-Java SDK for **AgentTrust**: secure, auditable AI agent operations.
+Java SDK for **AgentTrust ID**: secure, auditable AI agent operations.
 
 Requires **Java 21+**. Zero runtime dependencies (JDK only).
 

@@ -1,6 +1,9 @@
-# AgentTrust Rust SDK
+# AgentTrust ID Rust SDK
 
-Rust SDK for **AgentTrust** -- authentication and authorization for AI agents.
+[![crates.io](https://img.shields.io/crates/v/agenttrustid?cacheSeconds=300)](https://crates.io/crates/agenttrustid)
+[![docs.rs](https://img.shields.io/docsrs/agenttrustid?cacheSeconds=300)](https://docs.rs/agenttrustid)
+
+Rust SDK for **AgentTrust ID** -- authentication and authorization for AI agents.
 
 ## Installation
 

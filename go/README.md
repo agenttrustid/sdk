@@ -1,4 +1,7 @@
-# AgentTrust Go SDK
+# AgentTrust ID Go SDK
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/agenttrustid/sdk/go.svg)](https://pkg.go.dev/github.com/agenttrustid/sdk/go)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/agenttrustid/sdk?filename=go%2Fgo.mod&cacheSeconds=300)](go.mod)
 
 Go client library for [AgentTrust ID](https://github.com/agenttrustid/sdk) -- secure identity, authorization, and audit for AI agents.
 
