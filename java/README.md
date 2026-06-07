@@ -1,5 +1,7 @@
 # AgentTrust ID Java SDK
 
+[![Maven Central](https://img.shields.io/maven-central/v/id.agenttrust/agenttrustid?cacheSeconds=300)](https://central.sonatype.com/artifact/id.agenttrust/agenttrustid)
+
 Java SDK for **AgentTrust ID**: secure, auditable AI agent operations.
 
 Requires **Java 21+**. Zero runtime dependencies (JDK only).

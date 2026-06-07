@@ -9,7 +9,7 @@
     <version>0.3.0</version>
     <packaging>jar</packaging>
 
-    <name>AgentTrust Java SDK</name>
+    <name>AgentTrust ID Java SDK</name>
     <description>AgentTrust ID SDK — runtime authorization, opaque agent tokens, and Guardian checks for AI agents.</description>
     <url>https://agenttrust.id</url>
     <inceptionYear>2026</inceptionYear>
@@ -25,9 +25,9 @@
     <developers>
         <developer>
             <id>agenttrust</id>
-            <name>AgentTrust</name>
+            <name>AgentTrust ID</name>
             <email>contact@agenttrust.id</email>
-            <organization>AgentTrust</organization>
+            <organization>AgentTrust ID</organization>
             <organizationUrl>https://agenttrust.id</organizationUrl>
         </developer>
     </developers>
@@ -44,16 +44,11 @@
         <url>https://github.com/agenttrustid/sdk/issues</url>
     </issueManagement>
 
-    <distributionManagement>
-        <snapshotRepository>
-            <id>ossrh</id>
-            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
-        </snapshotRepository>
-        <repository>
-            <id>ossrh</id>
-            <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-        </repository>
-    </distributionManagement>
+    <!-- Publishing goes through the Central Portal (central.sonatype.com)
+         via central-publishing-maven-plugin below. The legacy OSSRH
+         (s01.oss.sonatype.org) distributionManagement was removed — that
+         system was decommissioned in 2025. Credentials live in
+         ~/.m2/settings.xml under server id "central". -->
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -139,6 +134,50 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <!-- Central Portal publishing: `mvn clean deploy -P release`
+                     uploads, validates, and (autoPublish) releases to Maven
+                     Central. -->
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.7.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <autoPublish>true</autoPublish>
+                    <waitUntil>published</waitUntil>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Signing only on release so day-to-day `mvn test` needs no GPG.
+             Passphrase comes from the MAVEN_GPG_PASSPHRASE environment
+             variable at deploy time. -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <bestPractices>true</bestPractices>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
