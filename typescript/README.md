@@ -2,8 +2,8 @@
 
 Authentication, authorization, and runtime security for AI agents.
 
-[![npm](https://img.shields.io/npm/v/@agenttrustid/sdk)](https://www.npmjs.com/package/@agenttrustid/sdk)
-[![Node](https://img.shields.io/node/v/@agenttrustid/sdk)](https://www.npmjs.com/package/@agenttrustid/sdk)
+[![npm](https://img.shields.io/npm/v/@agenttrustid/sdk?cacheSeconds=300)](https://www.npmjs.com/package/@agenttrustid/sdk)
+[![Node](https://img.shields.io/node/v/@agenttrustid/sdk?cacheSeconds=300)](https://www.npmjs.com/package/@agenttrustid/sdk)
 
 
 ## Install

@@ -2,8 +2,8 @@
 
 Authentication, authorization, and runtime security for AI agents.
 
-[![PyPI](https://img.shields.io/pypi/v/agenttrustid)](https://pypi.org/project/agenttrustid/)
-[![Python](https://img.shields.io/pypi/pyversions/agenttrustid)](https://pypi.org/project/agenttrustid/)
+[![PyPI](https://img.shields.io/pypi/v/agenttrustid?cacheSeconds=300)](https://pypi.org/project/agenttrustid/)
+[![Python](https://img.shields.io/pypi/pyversions/agenttrustid?cacheSeconds=300)](https://pypi.org/project/agenttrustid/)
 
 
 ## Install
