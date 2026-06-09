@@ -53,6 +53,8 @@ type Client struct {
 	Sessions *SessionsAPI
 	// Approvals provides AgentTrust elevation approval management.
 	Approvals *ApprovalsAPI
+	// MCP provides MCP proxy tool-calling.
+	MCP *MCPAPI
 }
 
 // Option configures the Client. Use the With* functions to create options.
@@ -122,6 +124,7 @@ func NewClient(opts ...Option) *Client {
 	c.Delegations = &DelegationsAPI{client: c}
 	c.Sessions = &SessionsAPI{client: c}
 	c.Approvals = &ApprovalsAPI{client: c}
+	c.MCP = &MCPAPI{client: c}
 
 	return c
 }
@@ -169,6 +172,12 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 // If body is nil, no request body is sent.
 // If result is nil, the response body is discarded (but errors are still checked).
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+	return c.doRequestWithHeaders(ctx, method, path, body, result, nil)
+}
+
+// doRequestWithHeaders is doRequest with additional per-request headers (e.g.
+// X-Agent-ID / X-Session-ID for the MCP proxy).
+func (c *Client) doRequestWithHeaders(ctx context.Context, method, path string, body interface{}, result interface{}, headers map[string]string) error {
 	url := c.baseURL + path
 
 	var reqBody io.Reader
@@ -194,6 +203,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := c.httpClient.Do(req)

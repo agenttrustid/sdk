@@ -132,6 +132,11 @@ impl<'a> Mcp<'a> {
     /// Calls `POST /mcp/{server_id}` with a JSON-RPC 2.0 envelope. Returns the
     /// `result` field on success.
     ///
+    /// The proxy authorizes the call by agent identity, so `agent_id` is required
+    /// and is sent as the `X-Agent-ID` header — the gateway rejects the request
+    /// without it. When `session_id` is `Some`, it is sent as `X-Session-ID` for
+    /// session-scoped authorization.
+    ///
     /// # Example
     ///
     /// ```rust,no_run
@@ -140,12 +145,21 @@ impl<'a> Mcp<'a> {
     /// # let client = AgentTrustClient::builder().build().unwrap();
     /// let result = client.mcp().call_tool(
     ///     "srv-1",
+    ///     "agent-1",
     ///     "tools/call",
     ///     Some(json!({"name": "ls"})),
+    ///     None,
     /// ).unwrap();
     /// println!("{}", result);
     /// ```
-    pub fn call_tool(&self, server_id: &str, method: &str, params: Option<Value>) -> Result<Value> {
+    pub fn call_tool(
+        &self,
+        server_id: &str,
+        agent_id: &str,
+        method: &str,
+        params: Option<Value>,
+        session_id: Option<&str>,
+    ) -> Result<Value> {
         let path = format!("/mcp/{}", server_id);
         let req = McpRpcRequest {
             jsonrpc: "2.0",
@@ -153,7 +167,13 @@ impl<'a> Mcp<'a> {
             method,
             params: params.as_ref(),
         };
-        let resp: Value = self.client.request("POST", &path, Some(req))?;
+        let mut headers: Vec<(&str, &str)> = vec![("X-Agent-ID", agent_id)];
+        if let Some(sid) = session_id {
+            headers.push(("X-Session-ID", sid));
+        }
+        let resp: Value = self
+            .client
+            .request_with_headers("POST", &path, Some(req), &headers)?;
         if let Some(result) = resp.get("result") {
             return Ok(result.clone());
         }
@@ -183,6 +203,35 @@ mod tests {
         let servers = client.mcp().list_servers().unwrap();
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].id, "s1");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_call_tool_sends_agent_and_session_headers() {
+        let mut srv = Server::new();
+        let mock = srv
+            .mock("POST", "/mcp/srv-1")
+            .match_header("X-Agent-ID", "agent-1")
+            .match_header("X-Session-ID", "sess-1")
+            .with_status(200)
+            .with_body(r#"{"jsonrpc":"2.0","id":1,"result":{"value":42}}"#)
+            .create();
+
+        let client = AgentTrustClient::builder()
+            .base_url(&srv.url())
+            .build()
+            .unwrap();
+        let result = client
+            .mcp()
+            .call_tool(
+                "srv-1",
+                "agent-1",
+                "tools/call",
+                Some(serde_json::json!({"name": "test"})),
+                Some("sess-1"),
+            )
+            .unwrap();
+        assert_eq!(result.get("value").and_then(|v| v.as_i64()), Some(42));
         mock.assert();
     }
 

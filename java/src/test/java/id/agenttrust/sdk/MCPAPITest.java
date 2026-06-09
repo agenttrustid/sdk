@@ -125,10 +125,12 @@ class MCPAPITest {
 
     @Test
     void testCallToolWithSessionId() throws AgentTrustException {
+        final String[] receivedAgentId = {null};
         final String[] receivedSessionId = {null};
         final String[] receivedMethod = {null};
 
         handlers.put("/mcp/srv-1", ex -> {
+            receivedAgentId[0] = ex.getRequestHeaders().getFirst("X-Agent-ID");
             receivedSessionId[0] = ex.getRequestHeaders().getFirst("X-Session-ID");
             String body = readBody(ex);
             Map<String, Object> req = JsonUtil.parse(body);
@@ -137,14 +139,23 @@ class MCPAPITest {
         });
 
         try (AgentTrustClient client = startServer()) {
-            Object result = client.mcp().callTool("srv-1", "tools/call",
+            Object result = client.mcp().callTool("srv-1", "agent-1", "tools/call",
                     Map.of("name", "test"), "sess-1");
+            assertEquals("agent-1", receivedAgentId[0]);
             assertEquals("sess-1", receivedSessionId[0]);
             assertEquals("tools/call", receivedMethod[0]);
             assertTrue(result instanceof Map);
             @SuppressWarnings("unchecked")
             Map<String, Object> m = (Map<String, Object>) result;
             assertEquals(42, m.get("value"));
+        }
+    }
+
+    @Test
+    void testCallToolRequiresAgentId() {
+        try (AgentTrustClient client = startServer()) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> client.mcp().callTool("srv-1", "", "tools/list", null));
         }
     }
 

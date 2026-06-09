@@ -199,6 +199,18 @@ impl AgentTrustClient {
         path: &str,
         body: Option<impl Serialize>,
     ) -> Result<T> {
+        self.request_with_headers(method, path, body, &[])
+    }
+
+    /// Perform an HTTP request with extra per-request headers, expecting a JSON
+    /// response body.
+    pub(crate) fn request_with_headers<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<impl Serialize>,
+        headers: &[(&str, &str)],
+    ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
 
         let mut req = match method {
@@ -214,6 +226,10 @@ impl AgentTrustClient {
 
         if let Some(key) = &self.api_key {
             req = req.header("X-API-Key", key);
+        }
+
+        for (name, value) in headers {
+            req = req.header(*name, *value);
         }
 
         if let Some(b) = body {
