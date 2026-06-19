@@ -39,6 +39,10 @@ type CreateAgentRequest struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 	// OrgID is the organization ID (optional, uses default org if empty).
 	OrgID string `json:"org_id,omitempty"`
+	// PublicKey is an optional caller-supplied Ed25519 public key (PKIX PEM).
+	// When empty, the SDK generates a keypair client-side and sends only the
+	// public key; the private key stays on this machine.
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 // Token represents an opaque agent token issued by ATI.
@@ -278,6 +282,7 @@ type createAgentAPIRequest struct {
 	Capabilities []string               `json:"capabilities"`
 	Metadata     map[string]interface{} `json:"metadata"`
 	OrgID        string                 `json:"org_id,omitempty"`
+	PublicKey    string                 `json:"public_key,omitempty"`
 }
 
 // createAgentResponse is the wire format returned by the API when creating an agent.

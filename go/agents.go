@@ -16,8 +16,11 @@ type AgentsAPI struct {
 
 // Create registers a new agent with the AgentTrust ID identity service.
 //
-// The returned Agent has a PrivateKey only when the platform supplies one
-// (it can also be generated client-side and registered separately). The
+// By default the SDK generates an Ed25519 identity keypair on this machine and
+// registers only the public key; the returned Agent.PrivateKey holds the private
+// key, which never leaves this process — persist it in a KeyStore (e.g.
+// NewKeychainKeyStore). To bring your own key, set CreateAgentRequest.PublicKey,
+// in which case the SDK sends only that and Agent.PrivateKey is empty. The
 // platform does not issue certificates.
 //
 // Example:
@@ -44,12 +47,27 @@ func (a *AgentsAPI) Create(ctx context.Context, req CreateAgentRequest) (*Agent,
 		meta = map[string]interface{}{}
 	}
 
+	// Generate an identity keypair client-side when the caller didn't supply a
+	// public key, so the private key never leaves this process. Only the public
+	// key is registered with the platform.
+	publicKeyPEM := req.PublicKey
+	var generatedPrivateKeyPEM string
+	if publicKeyPEM == "" {
+		kp, err := GenerateAgentKey()
+		if err != nil {
+			return nil, err
+		}
+		publicKeyPEM = kp.PublicKeyPEM
+		generatedPrivateKeyPEM = kp.PrivateKeyPEM
+	}
+
 	apiReq := createAgentAPIRequest{
 		Name:         req.Name,
 		Framework:    framework,
 		Capabilities: caps,
 		Metadata:     meta,
 		OrgID:        req.OrgID,
+		PublicKey:    publicKeyPEM,
 	}
 
 	var resp createAgentResponse
@@ -58,24 +76,30 @@ func (a *AgentsAPI) Create(ctx context.Context, req CreateAgentRequest) (*Agent,
 	}
 
 	// The API may return the agent data in a nested "agent" field or at the top level.
+	var agent *Agent
 	if resp.Agent != nil {
-		return parseAgentFromData(resp.Agent), nil
+		agent = parseAgentFromData(resp.Agent)
+	} else {
+		agent = parseAgentFromData(&agentData{
+			ID:           resp.ID,
+			Name:         resp.Name,
+			OrgID:        resp.OrgID,
+			Framework:    resp.Framework,
+			PublicKey:    resp.PublicKey,
+			Status:       resp.Status,
+			Capabilities: resp.Capabilities,
+			Metadata:     resp.Metadata,
+			CreatedAt:    resp.CreatedAt,
+			PrivateKey:   resp.PrivateKey,
+		})
 	}
 
-	// Flat response: construct agentData from top-level fields
-	ad := &agentData{
-		ID:           resp.ID,
-		Name:         resp.Name,
-		OrgID:        resp.OrgID,
-		Framework:    resp.Framework,
-		PublicKey:    resp.PublicKey,
-		Status:       resp.Status,
-		Capabilities: resp.Capabilities,
-		Metadata:     resp.Metadata,
-		CreatedAt:    resp.CreatedAt,
-		PrivateKey:   resp.PrivateKey,
+	// When we generated the keypair locally, the private key stays here and is
+	// never round-tripped through the platform.
+	if generatedPrivateKeyPEM != "" && agent != nil {
+		agent.PrivateKey = generatedPrivateKeyPEM
 	}
-	return parseAgentFromData(ad), nil
+	return agent, nil
 }
 
 // Get retrieves an agent by its ID.
