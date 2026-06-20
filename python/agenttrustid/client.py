@@ -1,5 +1,6 @@
 """AgentTrust SDK Main Client"""
 
+import base64
 import json
 import ssl
 import time
@@ -10,7 +11,11 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 
-from .models import Agent, Token, IntrospectionResult, Organization, ActionCheckResult, Session, ApprovalRequest
+from .models import (
+    Agent, Token, IntrospectionResult, Organization, ActionCheckResult, Session, ApprovalRequest,
+    WIMSETokenResponse, VerifyWIMSETokenResponse, ChallengeResponse,
+)
+from .keys import KeyStore
 from .exceptions import (
     AgentTrustError,
     AuthenticationError,
@@ -521,6 +526,102 @@ class ApprovalsAPI:
         return ApprovalRequest.from_dict(result)
 
 
+def _pop_message(nonce: str, agent_id: str, audience: str, ts: int) -> bytes:
+    """Build the canonical proof-of-possession message.
+
+    Must stay byte-identical to the server's ``crypto.PoPMessage``:
+    ``pop-v1:<nonce>:<agentID>:<audience>:<ts>`` where ``audience`` is the
+    comma-joined request audience (in request order) and ``ts`` is the signing
+    time in unix seconds.
+    """
+    return f"pop-v1:{nonce}:{agent_id}:{audience}:{ts}".encode("utf-8")
+
+
+class WIMSEAPI:
+    """WIMSE workload identity token operations.
+
+    Issues and verifies SPIFFE-style workload identity tokens (JWTs) for agents,
+    and supports proof-of-possession: an agent proves it holds its registered
+    private key by signing a server challenge, binding the issued token to that
+    key via the RFC 7800 ``cnf.jkt`` claim.
+    """
+
+    def __init__(self, http: HTTPClient):
+        self._http = http
+
+    def issue_token(
+        self,
+        agent_id: str,
+        service_name: Optional[str] = None,
+        environment: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        audience: Optional[List[str]] = None,
+        proof: Optional[dict] = None,
+    ) -> WIMSETokenResponse:
+        """Issue a WIMSE workload identity token (``POST /api/v1/wimse/token``)."""
+        data: Dict = {"agent_id": agent_id}
+        if service_name is not None:
+            data["service_name"] = service_name
+        if environment is not None:
+            data["environment"] = environment
+        if ttl_seconds is not None:
+            data["ttl_seconds"] = ttl_seconds
+        if audience:
+            data["audience"] = audience
+        if proof is not None:
+            data["proof"] = proof
+        return WIMSETokenResponse.from_dict(self._http.post("/api/v1/wimse/token", data))
+
+    def verify_token(
+        self, token: str, trust_domain_filter: Optional[str] = None
+    ) -> VerifyWIMSETokenResponse:
+        """Verify a WIMSE workload identity token (``POST /api/v1/wimse/verify``)."""
+        data: Dict = {"token": token}
+        if trust_domain_filter:
+            data["trust_domain_filter"] = trust_domain_filter
+        return VerifyWIMSETokenResponse.from_dict(self._http.post("/api/v1/wimse/verify", data))
+
+    def challenge(self, agent_id: str) -> ChallengeResponse:
+        """Request a single-use proof-of-possession challenge nonce for an agent."""
+        return ChallengeResponse.from_dict(
+            self._http.post(f"/api/v1/agents/{agent_id}/challenge")
+        )
+
+    def issue_token_with_proof(
+        self,
+        agent_id: str,
+        key_store: KeyStore,
+        service_name: Optional[str] = None,
+        environment: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        audience: Optional[List[str]] = None,
+    ) -> WIMSETokenResponse:
+        """Issue a WIMSE token using proof-of-possession.
+
+        Fetches a challenge for the agent, signs the canonical challenge message
+        with the agent's key from ``key_store``, and issues with the proof
+        attached so the resulting token is bound to the agent key (``cnf.jkt``).
+        Required when the org enables proof-of-possession.
+        """
+        challenge = self.challenge(agent_id)
+        ts = int(time.time())
+        aud_str = ",".join(audience) if audience else ""
+        signature = key_store.sign(agent_id, _pop_message(challenge.nonce, agent_id, aud_str, ts))
+        proof = {
+            "nonce": challenge.nonce,
+            "ts": ts,
+            "signature": base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii"),
+        }
+        return self.issue_token(
+            agent_id,
+            service_name=service_name,
+            environment=environment,
+            ttl_seconds=ttl_seconds,
+            audience=audience,
+            proof=proof,
+        )
+
+
 class AgentTrustClient:
     """
     AgentTrust Client - Main entry point for AgentTrust.
@@ -602,6 +703,7 @@ class AgentTrustClient:
         self.tokens = TokensAPI(self._http, self._auth_http)
         self.actions = ActionsAPI(self._auth_http)
         self.telemetry = TelemetryAPI(self._audit_http)
+        self.wimse = WIMSEAPI(self._http)
 
         # Lazy-initialized protocol API instances
         self._a2a = None

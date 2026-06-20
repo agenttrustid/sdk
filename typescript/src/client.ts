@@ -38,8 +38,13 @@ import {
   CreateSIEMDestinationRequest,
   UpdateSIEMDestinationRequest,
   SIEMDeliveryRecord,
+  IssueWIMSETokenRequest,
+  WIMSETokenResponse,
+  VerifyWIMSETokenRequest,
+  VerifyWIMSETokenResponse,
+  ChallengeResponse,
 } from './types';
-import { generateAgentKey } from './keys';
+import { generateAgentKey, KeyStore } from './keys';
 import {
   AgentTrustError,
   AuthenticationError,
@@ -1397,6 +1402,90 @@ export class ApprovalsAPI {
  * if (result.active) { /* ... *\/ }
  * ```
  */
+/**
+ * WIMSE workload identity token operations.
+ *
+ * Issues and verifies SPIFFE-style workload identity tokens (JWTs) for agents,
+ * and supports proof-of-possession: an agent proves it holds its registered
+ * private key by signing a server challenge, binding the issued token to that
+ * key via the RFC 7800 `cnf.jkt` claim.
+ */
+export class WIMSEAPI {
+  private http: HttpClient;
+
+  constructor(http: HttpClient) {
+    this.http = http;
+  }
+
+  /** Issue a WIMSE workload identity token (`POST /api/v1/wimse/token`). */
+  async issueToken(req: IssueWIMSETokenRequest): Promise<WIMSETokenResponse> {
+    const body: Record<string, unknown> = { agent_id: req.agentId };
+    if (req.serviceName !== undefined) body.service_name = req.serviceName;
+    if (req.environment !== undefined) body.environment = req.environment;
+    if (req.ttlSeconds !== undefined) body.ttl_seconds = req.ttlSeconds;
+    if (req.audience && req.audience.length) body.audience = req.audience;
+    if (req.proof) {
+      body.proof = { nonce: req.proof.nonce, ts: req.proof.ts, signature: req.proof.signature };
+    }
+    const r = await this.http.post<Record<string, unknown>>('/api/v1/wimse/token', body);
+    return {
+      token: (r.token as string) || '',
+      workloadId: (r.workload_id as string) || '',
+      trustDomain: (r.trust_domain as string) || '',
+      expiresAt: (r.expires_at as string) || '',
+    };
+  }
+
+  /** Verify a WIMSE workload identity token (`POST /api/v1/wimse/verify`). */
+  async verifyToken(req: VerifyWIMSETokenRequest): Promise<VerifyWIMSETokenResponse> {
+    const body: Record<string, unknown> = { token: req.token };
+    if (req.trustDomainFilter) body.trust_domain_filter = req.trustDomainFilter;
+    const r = await this.http.post<Record<string, unknown>>('/api/v1/wimse/verify', body);
+    return {
+      valid: Boolean(r.valid),
+      agentId: r.agent_id as string | undefined,
+      workloadId: r.workload_id as string | undefined,
+      trustDomain: r.trust_domain as string | undefined,
+      capabilities: (r.capabilities as string[]) || [],
+      reason: r.reason as string | undefined,
+    };
+  }
+
+  /** Request a single-use proof-of-possession challenge nonce for an agent. */
+  async challenge(agentId: string): Promise<ChallengeResponse> {
+    const r = await this.http.post<Record<string, unknown>>(
+      `/api/v1/agents/${agentId}/challenge`,
+    );
+    return { nonce: (r.nonce as string) || '', expiresAt: (r.expires_at as string) || '' };
+  }
+
+  /**
+   * Issue a WIMSE token using proof-of-possession.
+   *
+   * Fetches a challenge for the agent, signs the canonical challenge message
+   * with the agent's key from `keyStore`, and issues with the proof attached so
+   * the resulting token is bound to the agent key (`cnf.jkt`). Required when the
+   * org enables proof-of-possession.
+   */
+  async issueTokenWithProof(
+    req: IssueWIMSETokenRequest,
+    keyStore: KeyStore,
+  ): Promise<WIMSETokenResponse> {
+    const challenge = await this.challenge(req.agentId);
+    const ts = Math.floor(Date.now() / 1000);
+    const audience = (req.audience || []).join(',');
+    // Canonical message must stay byte-identical to the server's
+    // crypto.PoPMessage: "pop-v1:<nonce>:<agentID>:<audience>:<ts>".
+    const message = `pop-v1:${challenge.nonce}:${req.agentId}:${audience}:${ts}`;
+    const sig = keyStore.sign(req.agentId, new TextEncoder().encode(message));
+    const signature = Buffer.from(sig).toString('base64url');
+    return this.issueToken({
+      ...req,
+      proof: { nonce: challenge.nonce, ts, signature },
+    });
+  }
+}
+
 export class AgentTrustClient {
   private http: HttpClient;
   private authHttp: HttpClient;
@@ -1413,6 +1502,7 @@ export class AgentTrustClient {
   public readonly streaming: StreamingAPI;
   public readonly sessions: SessionsAPI;
   public readonly approvals: ApprovalsAPI;
+  public readonly wimse: WIMSEAPI;
 
   constructor(options: AgentTrustClientOptions = {}) {
     const baseUrl = options.baseUrl || 'http://localhost:8080';
@@ -1443,6 +1533,7 @@ export class AgentTrustClient {
     this.streaming = new StreamingAPI(this.http);
     this.sessions = new SessionsAPI(this.http);
     this.approvals = new ApprovalsAPI(this.http);
+    this.wimse = new WIMSEAPI(this.http);
   }
 
   /**

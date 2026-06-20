@@ -572,6 +572,57 @@ class Delegation:
         )
 
 
+@dataclass
+class WIMSETokenResponse:
+    """Result of issuing a WIMSE workload identity token."""
+    token: str = ""
+    workload_id: str = ""
+    trust_domain: str = ""
+    expires_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WIMSETokenResponse":
+        return cls(
+            token=data.get("token", ""),
+            workload_id=data.get("workload_id", ""),
+            trust_domain=data.get("trust_domain", ""),
+            expires_at=data.get("expires_at", ""),
+        )
+
+
+@dataclass
+class VerifyWIMSETokenResponse:
+    """Result of verifying a WIMSE workload identity token."""
+    valid: bool = False
+    agent_id: Optional[str] = None
+    workload_id: Optional[str] = None
+    trust_domain: Optional[str] = None
+    capabilities: List[str] = field(default_factory=list)
+    reason: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "VerifyWIMSETokenResponse":
+        return cls(
+            valid=data.get("valid", False),
+            agent_id=data.get("agent_id"),
+            workload_id=data.get("workload_id"),
+            trust_domain=data.get("trust_domain"),
+            capabilities=data.get("capabilities", []) or [],
+            reason=data.get("reason"),
+        )
+
+
+@dataclass
+class ChallengeResponse:
+    """Server reply to a proof-of-possession challenge."""
+    nonce: str = ""
+    expires_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ChallengeResponse":
+        return cls(nonce=data.get("nonce", ""), expires_at=data.get("expires_at", ""))
+
+
 # Backwards-compat aliases. The platform no longer issues certificates and
 # tokens are no longer JWTs, but external code may import these names.
 VerificationResult = IntrospectionResult

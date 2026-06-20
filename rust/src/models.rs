@@ -1169,6 +1169,37 @@ pub struct IssueWIMSETokenRequest {
     /// Optional TTL in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u64>,
+    /// Optional audience entries the token is intended for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Vec<String>>,
+    /// Proof-of-possession over a server challenge. Prefer
+    /// [`crate::wimse::Wimse::issue_token_with_proof`], which populates this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<PoPProof>,
+}
+
+/// A proof-of-possession: an Ed25519 signature over a server-issued challenge
+/// nonce, proving the agent holds the private key matching its registered public
+/// key. A valid proof binds the issued token to that key via `cnf.jkt`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoPProof {
+    /// The single-use challenge nonce.
+    pub nonce: String,
+    /// Signing time in unix seconds.
+    pub ts: i64,
+    /// Ed25519 signature, base64url without padding.
+    pub signature: String,
+}
+
+/// Server reply to a proof-of-possession challenge.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChallengeResponse {
+    /// The single-use challenge nonce.
+    #[serde(default)]
+    pub nonce: String,
+    /// When the nonce expires (ISO 8601).
+    #[serde(default)]
+    pub expires_at: String,
 }
 
 /// Result of issuing a WIMSE workload identity token.

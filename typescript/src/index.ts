@@ -48,6 +48,7 @@ export {
   StreamingAPI,
   SessionsAPI,
   ApprovalsAPI,
+  WIMSEAPI,
   primaryUrl,
   trustScore,
   TRUST_EXTENSION_URI,
@@ -132,4 +133,10 @@ export type {
   CreateSIEMDestinationRequest,
   UpdateSIEMDestinationRequest,
   SIEMDeliveryRecord,
+  IssueWIMSETokenRequest,
+  PoPProof,
+  WIMSETokenResponse,
+  VerifyWIMSETokenRequest,
+  VerifyWIMSETokenResponse,
+  ChallengeResponse,
 } from './types';

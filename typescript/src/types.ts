@@ -434,6 +434,58 @@ export interface SIEMDeliveryRecord {
   deliveredAt: string;
 }
 
+// --- WIMSE workload identity ---
+
+export interface IssueWIMSETokenRequest {
+  agentId: string;
+  serviceName?: string;
+  environment?: string;
+  ttlSeconds?: number;
+  /** Audience entries the token is intended for. */
+  audience?: string[];
+  /** Proof-of-possession over a server challenge. Prefer `issueTokenWithProof`. */
+  proof?: PoPProof;
+}
+
+/**
+ * A proof-of-possession: an Ed25519 signature over a server-issued challenge
+ * nonce, proving the agent holds the private key matching its registered public
+ * key. A valid proof binds the issued token to that key via `cnf.jkt`.
+ */
+export interface PoPProof {
+  nonce: string;
+  /** Signing time in unix seconds. */
+  ts: number;
+  /** Ed25519 signature, base64url without padding. */
+  signature: string;
+}
+
+export interface WIMSETokenResponse {
+  token: string;
+  workloadId: string;
+  trustDomain: string;
+  expiresAt: string;
+}
+
+export interface VerifyWIMSETokenRequest {
+  token: string;
+  trustDomainFilter?: string;
+}
+
+export interface VerifyWIMSETokenResponse {
+  valid: boolean;
+  agentId?: string;
+  workloadId?: string;
+  trustDomain?: string;
+  capabilities?: string[];
+  reason?: string;
+}
+
+export interface ChallengeResponse {
+  nonce: string;
+  expiresAt: string;
+}
+
 // --- Approvals ---
 
 export interface ApprovalRequest {

@@ -2,8 +2,12 @@ package agenttrust
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -43,6 +47,73 @@ func TestWIMSEIssueToken(t *testing.T) {
 	}
 	if resp.WorkloadID != "spiffe://agenttrust.id/agent/agent-1" {
 		t.Errorf("expected SPIFFE URI, got %q", resp.WorkloadID)
+	}
+}
+
+// TestWIMSEIssueTokenWithProof verifies the SDK performs the full
+// challenge -> sign -> issue flow and that the proof it sends is a valid Ed25519
+// signature over the canonical message the server expects.
+func TestWIMSEIssueTokenWithProof(t *testing.T) {
+	key, err := GenerateAgentKey()
+	if err != nil {
+		t.Fatalf("GenerateAgentKey: %v", err)
+	}
+	ks := NewMemoryKeyStore()
+	if err := ks.Store("agent-1", key.PrivateKeyPEM); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	const nonce = "server-nonce-xyz"
+	audience := []string{"https://api.example.com"}
+	var gotProof *PoPProof
+
+	srv := newTestServer(map[string]http.HandlerFunc{
+		"POST /api/v1/agents/agent-1/challenge": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(ChallengeResponse{Nonce: nonce, ExpiresAt: "2026-03-03T01:00:00Z"})
+		},
+		"POST /api/v1/wimse/token": func(w http.ResponseWriter, r *http.Request) {
+			var req IssueWIMSETokenRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			gotProof = req.Proof
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(WIMSETokenResponse{Token: "eyJ.bound", TrustDomain: "agenttrust.id"})
+		},
+	})
+	defer srv.Close()
+
+	c := NewClient(WithBaseURL(srv.URL))
+	resp, err := c.WIMSE.IssueTokenWithProof(context.Background(), IssueWIMSETokenRequest{
+		AgentID:  "agent-1",
+		Audience: audience,
+	}, ks)
+	if err != nil {
+		t.Fatalf("IssueTokenWithProof: %v", err)
+	}
+	if resp.Token != "eyJ.bound" {
+		t.Errorf("token = %q", resp.Token)
+	}
+	if gotProof == nil {
+		t.Fatal("server did not receive a proof")
+	}
+	if gotProof.Nonce != nonce {
+		t.Errorf("proof nonce = %q, want %q", gotProof.Nonce, nonce)
+	}
+
+	// The signature must verify against the canonical message with the agent's
+	// public key — exactly what the server's VerifyPoP does.
+	priv, err := parsePrivateKeyPEM(key.PrivateKeyPEM)
+	if err != nil {
+		t.Fatalf("parse private key: %v", err)
+	}
+	pub := priv.Public().(ed25519.PublicKey)
+	sig, err := base64.RawURLEncoding.DecodeString(gotProof.Signature)
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	msg := []byte("pop-v1:" + nonce + ":agent-1:" + strings.Join(audience, ",") + ":" + strconv.FormatInt(gotProof.Timestamp, 10))
+	if !ed25519.Verify(pub, msg, sig) {
+		t.Error("proof signature did not verify against canonical message")
 	}
 }
 

@@ -42,7 +42,11 @@ from .models import (
     VerifyFederatedTokenResult,
     SIEMDestination,
     SIEMDeliveryRecord,
+    WIMSETokenResponse,
+    VerifyWIMSETokenResponse,
+    ChallengeResponse,
 )
+from .client import WIMSEAPI
 from .a2a import A2AAPI
 from .agentcard import AgentCardsAPI
 from .mcp_client import MCPAPI
@@ -90,6 +94,10 @@ __all__ = [
     "VerifyFederatedTokenResult",
     "SIEMDestination",
     "SIEMDeliveryRecord",
+    "WIMSETokenResponse",
+    "VerifyWIMSETokenResponse",
+    "ChallengeResponse",
+    "WIMSEAPI",
     "A2AAPI",
     "AgentCardsAPI",
     "MCPAPI",
