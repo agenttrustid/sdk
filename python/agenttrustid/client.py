@@ -133,13 +133,17 @@ class AgentsAPI:
         org_id: str = None,
         capabilities: List[str] = None,
         metadata: Dict = None,
+        public_key: str = None,
     ) -> Agent:
         """
         Register a new agent.
 
-        The platform does not issue certificates or client-side credentials.
-        Use ``client.tokens.issue(...)`` afterwards to mint opaque ``at_`` tokens
-        for the agent.
+        By default the SDK generates an Ed25519 identity keypair locally and
+        registers only the public key; the returned ``Agent.private_key`` holds the
+        private key, which never leaves this process — store it in a KeyStore.
+        Pass ``public_key`` (PKIX PEM) to bring your own. The platform does not
+        issue certificates; use ``client.tokens.issue(...)`` afterwards to mint
+        opaque ``at_`` tokens.
 
         Args:
             name: Unique agent name within organization
@@ -147,6 +151,8 @@ class AgentsAPI:
             org_id: Organization ID (uses default if not specified)
             capabilities: List of capabilities the agent can request
             metadata: Additional metadata
+            public_key: Optional caller-supplied Ed25519 public key (PKIX PEM); when
+                omitted the SDK generates the keypair and keeps the private key local
 
         Returns:
             Agent record.
@@ -158,17 +164,35 @@ class AgentsAPI:
                 capabilities=["files:read", "web:fetch"]
             )
         """
+        from .keys import generate_agent_key
+
+        # Generate an identity keypair client-side when the caller didn't supply a
+        # public key, so the private key never leaves this process. Only the public
+        # key is registered with the platform.
+        generated_private_key_pem = None
+        pub = public_key
+        if not pub:
+            keypair = generate_agent_key()
+            pub = keypair.public_key_pem
+            generated_private_key_pem = keypair.private_key_pem
+
         data = {
             "name": name,
             "framework": framework,
             "capabilities": capabilities or [],
             "metadata": metadata or {},
+            "public_key": pub,
         }
         if org_id:
             data["org_id"] = org_id
 
         result = self._http.post("/api/v1/agents", data)
-        return Agent.from_dict(result)
+        agent = Agent.from_dict(result)
+        # When we generated the keypair locally, the private key stays here and is
+        # never round-tripped through the platform.
+        if generated_private_key_pem is not None:
+            agent.private_key = generated_private_key_pem
+        return agent
 
     def get(self, agent_id: str) -> Agent:
         """Get agent by ID"""

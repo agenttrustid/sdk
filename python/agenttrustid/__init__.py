@@ -51,6 +51,14 @@ from .federation import FederationAPI
 from .streaming import StreamingAPI
 from .client import SessionsAPI, ApprovalsAPI
 from .guard import AgentTrustGuard
+from .keys import (
+    AgentKeyPair,
+    KeyStore,
+    InMemoryKeyStore,
+    KeychainKeyStore,
+    generate_agent_key,
+    sign_with_private_key_pem,
+)
 from .exceptions import (
     AgentTrustError,
     AuthenticationError,
@@ -90,6 +98,12 @@ __all__ = [
     "StreamingAPI",
     "SessionsAPI",
     "ApprovalsAPI",
+    "AgentKeyPair",
+    "KeyStore",
+    "InMemoryKeyStore",
+    "KeychainKeyStore",
+    "generate_agent_key",
+    "sign_with_private_key_pem",
     "AgentTrustError",
     "AuthenticationError",
     "AuthorizationError",
