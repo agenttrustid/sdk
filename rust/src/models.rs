@@ -283,6 +283,12 @@ pub struct CreateAgentRequest {
     /// Organization ID (optional, uses default org if empty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org_id: Option<String>,
+    /// Bring-your-own Ed25519 public key (PKIX/SPKI PEM). When omitted, the SDK
+    /// generates a keypair locally at create time and registers only the public
+    /// half; the private key is returned on the resulting [`Agent`] and never
+    /// sent to the platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
 }
 
 fn default_framework() -> String {

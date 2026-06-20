@@ -65,6 +65,7 @@ pub mod delegations;
 pub mod error;
 pub mod federation;
 pub mod guard;
+pub mod keys;
 pub mod mcp;
 pub mod models;
 pub mod sessions;
@@ -85,6 +86,10 @@ pub use delegations::Delegations;
 pub use error::{AgentTrustError, Result};
 pub use federation::Federation;
 pub use guard::{AgentTrustGuard, AgentTrustGuardBuilder};
+pub use keys::{
+    generate_agent_key, sign_with_private_key_pem, AgentKeyPair, InMemoryKeyStore, KeyStore,
+    KeychainBackend, KeychainKeyStore,
+};
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------

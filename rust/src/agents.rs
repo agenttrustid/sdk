@@ -49,8 +49,29 @@ impl<'a> AgentsAPI<'a> {
     /// - [`AgentTrustError::Validation`](crate::AgentTrustError::Validation) if required fields are missing.
     /// - [`AgentTrustError::Authentication`](crate::AgentTrustError::Authentication) if the API key is invalid.
     pub fn create(&self, req: &CreateAgentRequest) -> Result<Agent> {
-        let resp: CreateAgentResponse = self.client.request("POST", "/api/v1/agents", Some(req))?;
-        Ok(resp.into_agent())
+        // Generate an identity keypair client-side when the caller didn't supply
+        // a public key, so the private key never leaves this process. Only the
+        // public key is registered with the platform.
+        let mut generated_private_key: Option<String> = None;
+        let body = if req.public_key.is_none() {
+            let kp = crate::keys::generate_agent_key()?;
+            generated_private_key = Some(kp.private_key_pem);
+            let mut cloned = req.clone();
+            cloned.public_key = Some(kp.public_key_pem);
+            cloned
+        } else {
+            req.clone()
+        };
+
+        let resp: CreateAgentResponse =
+            self.client.request("POST", "/api/v1/agents", Some(&body))?;
+        let mut agent = resp.into_agent();
+        // When we generated the keypair locally, the private key stays here and
+        // is attached to the returned agent regardless of what the server echoes.
+        if generated_private_key.is_some() {
+            agent.private_key = generated_private_key;
+        }
+        Ok(agent)
     }
 
     /// Retrieve an agent by its unique ID.
@@ -103,6 +124,7 @@ impl Default for CreateAgentRequest {
             capabilities: Vec::new(),
             metadata: serde_json::Value::Object(serde_json::Map::new()),
             org_id: None,
+            public_key: None,
         }
     }
 }
