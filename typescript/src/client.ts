@@ -39,6 +39,7 @@ import {
   UpdateSIEMDestinationRequest,
   SIEMDeliveryRecord,
 } from './types';
+import { generateAgentKey } from './keys';
 import {
   AgentTrustError,
   AuthenticationError,
@@ -193,23 +194,43 @@ export class AgentsAPI {
   /**
    * Register a new agent.
    *
-   * The platform does not issue certificates or client-side credentials; use
-   * {@link TokensAPI.issue} afterwards to mint opaque `at_` tokens for the
-   * agent.
+   * By default the SDK generates an Ed25519 identity keypair on this machine and
+   * registers only the public key; the returned `Agent.privateKey` holds the
+   * private key, which never leaves this process — persist it in a KeyStore. To
+   * bring your own key, set `request.publicKey`. The platform does not issue
+   * certificates; use {@link TokensAPI.issue} afterwards to mint opaque `at_`
+   * tokens for the agent.
    */
   async create(request: CreateAgentRequest): Promise<Agent> {
+    // Generate an identity keypair client-side when the caller didn't supply a
+    // public key, so the private key never leaves this process.
+    let publicKeyPem = request.publicKey;
+    let generatedPrivateKeyPem: string | undefined;
+    if (!publicKeyPem) {
+      const kp = generateAgentKey();
+      publicKeyPem = kp.publicKeyPem;
+      generatedPrivateKeyPem = kp.privateKeyPem;
+    }
+
     const data = {
       name: request.name,
       framework: request.framework || 'custom',
       org_id: request.orgId,
       capabilities: request.capabilities || [],
       metadata: request.metadata || {},
+      public_key: publicKeyPem,
     };
 
     const result = await this.http.post<Record<string, unknown>>('/api/v1/agents', data);
     // API may wrap response in {"agent": {...}}
     const agentData = (result.agent as Record<string, unknown>) || result;
-    return parseAgent(agentData);
+    const agent = parseAgent(agentData);
+    // When we generated the keypair locally, the private key stays here and is
+    // never round-tripped through the platform.
+    if (generatedPrivateKeyPem) {
+      agent.privateKey = generatedPrivateKeyPem;
+    }
+    return agent;
   }
 
   /**

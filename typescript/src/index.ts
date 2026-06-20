@@ -63,6 +63,15 @@ export {
   ValidationError,
 } from './errors';
 
+// Client-side agent identity keys.
+export {
+  generateAgentKey,
+  signWithPrivateKeyPem,
+  MemoryKeyStore,
+  KeychainKeyStore,
+} from './keys';
+export type { AgentKeyPair, KeyStore } from './keys';
+
 // Optional integrations (peer deps — `@langchain/core` and `ai`).
 export {
   AgentTrustLangChainHandler,

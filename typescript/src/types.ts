@@ -61,6 +61,12 @@ export interface CreateAgentRequest {
   orgId?: string;
   capabilities?: string[];
   metadata?: Record<string, unknown>;
+  /**
+   * Optional caller-supplied Ed25519 public key (PKIX PEM). When omitted, the
+   * SDK generates a keypair client-side and sends only the public key; the
+   * private key stays on this machine.
+   */
+  publicKey?: string;
 }
 
 export interface IssueTokenRequest {
