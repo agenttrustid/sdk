@@ -32,8 +32,19 @@ public class AgentsAPI {
      */
     public Agent create(CreateAgentRequest request) throws AgentTrustException {
         Map<String, Object> body = request.toJson();
+        // Generate an identity keypair client-side when the caller didn't supply a
+        // public key, so the private key never leaves this process. Only the public
+        // key is registered with the platform.
+        String generatedPrivateKeyPem = null;
+        if (!body.containsKey("public_key")) {
+            AgentKeys.AgentKeyPair keyPair = AgentKeys.generateAgentKey();
+            body.put("public_key", keyPair.publicKeyPem());
+            generatedPrivateKeyPem = keyPair.privateKeyPem();
+        }
         Map<String, Object> result = httpClient.post("/api/v1/agents", body);
-        return Agent.fromJson(result);
+        Agent agent = Agent.fromJson(result);
+        // When we generated the keypair locally, the private key stays here.
+        return generatedPrivateKeyPem != null ? agent.withPrivateKey(generatedPrivateKeyPem) : agent;
     }
 
     /**

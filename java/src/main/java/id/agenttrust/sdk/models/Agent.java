@@ -44,6 +44,16 @@ public class Agent {
         this.privateKey = privateKey;
     }
 
+    /**
+     * Returns a copy of this agent carrying the given private key. Used when the
+     * SDK generates the keypair client-side: the private key stays local and is
+     * attached to the returned agent rather than round-tripped through the API.
+     */
+    public Agent withPrivateKey(String privateKeyPem) {
+        return new Agent(id, name, orgId, framework, publicKey, status,
+                capabilities, metadata, createdAt, privateKeyPem);
+    }
+
     /** Unique agent identifier. */
     public String getId() {
         return id;
