@@ -24,6 +24,8 @@ thiserror = "2"
 # Client-side Ed25519 identity keys (PKIX/SPKI + PKCS#8 PEM).
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# SHA-256 for the DPoP access-token hash (ath claim, RFC 9449).
+sha2 = "0.10"
 # OS keychain storage for KeyStore (opt-in via the `keychain` feature).
 keyring = { version = "3", optional = true }
 
