@@ -72,6 +72,7 @@ export {
   KeychainKeyStore,
 } from './keys';
 export type { AgentKeyPair, KeyStore } from './keys';
+export { mintDPoPProof, mintDPoPProofWithKeyStore } from './dpop';
 
 // Optional integrations (peer deps — `@langchain/core` and `ai`).
 export {
