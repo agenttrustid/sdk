@@ -108,3 +108,43 @@ func TestMintDPoPProof_InvalidKeyRejected(t *testing.T) {
 		t.Fatal("expected error for invalid private key PEM")
 	}
 }
+
+func TestMintDPoPProofWithKeyStore_VerifiesAndOmitsExportedKey(t *testing.T) {
+	kp, err := GenerateAgentKey()
+	if err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	ks := NewMemoryKeyStore()
+	if err := ks.Store("agent-1", kp.PrivateKeyPEM); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Signs through the KeyStore; only the public key PEM is supplied.
+	proof, err := MintDPoPProofWithKeyStore(ks, "agent-1", kp.PublicKeyPEM,
+		"POST", "https://api.agenttrust.id/api/v1/agenttrust/check", "tok")
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+
+	header, payload, signingInput, sig := parseDPoP(t, proof)
+	if header["typ"] != "dpop+jwt" || header["alg"] != "EdDSA" {
+		t.Fatalf("bad header: %v", header)
+	}
+	jwk := header["jwk"].(map[string]interface{})
+	x, err := base64.RawURLEncoding.DecodeString(jwk["x"].(string))
+	if err != nil || len(x) != ed25519.PublicKeySize {
+		t.Fatalf("bad jwk.x: %v", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(x), []byte(signingInput), sig) {
+		t.Error("KeyStore-minted DPoP did not verify against embedded jwk")
+	}
+	if payload["jti"] == nil || payload["jti"] == "" {
+		t.Error("jti missing")
+	}
+}
+
+func TestMintDPoPProofWithKeyStore_NilKeyStore(t *testing.T) {
+	if _, err := MintDPoPProofWithKeyStore(nil, "a", "", "GET", "https://x/y", ""); err == nil {
+		t.Fatal("expected error for nil KeyStore")
+	}
+}
