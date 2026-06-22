@@ -18,8 +18,10 @@
 //	# differ, even the legitimate check fails with a DPoP URL error.
 //	cd sdk/go && go run ./examples/dpop_proof
 //
-// The demo enables `require_sender_constrained_tokens` on the org for the
-// duration of the run and restores the prior setting at the end.
+// PRECONDITION: enable the org's enforcement toggle first, in the dashboard at
+// Settings → Security → "Require sender-constrained tokens (DPoP)" (that setting
+// is admin/session-gated, so the demo can't flip it with an API key). The demo
+// detects whether it is on and tells you if it isn't.
 package main
 
 import (
@@ -68,11 +70,6 @@ func main() {
     5. DPoP proof           per-request signature proving key possession on THIS call
 `))
 
-	// Enforce sender-constrained tokens for this org, restore on exit.
-	prior := getSecuritySettings()
-	setSecuritySettings(true, true)
-	defer setSecuritySettings(prior.RequireProofOfPossession, prior.RequireSenderConstrainedTokens)
-
 	client := agenttrust.NewClient(agenttrust.WithBaseURL(baseURL), agenttrust.WithAPIKey(adminKey))
 
 	// ── Token order steps 1–4: register an agent and stand up its credentials ──
@@ -90,6 +87,17 @@ func main() {
 	tokenA, err := credsA.Token(ctx)
 	must(err, "issue WIMSE token for A (proof-of-possession)")
 	fmt.Printf("  step 4: WIMSE token issued for A (cnf.jkt-bound): %s…\n", short(tokenA))
+
+	// Precondition: the org must enforce sender-constrained tokens, else the
+	// rejection proofs can't fire. Detect it behaviorally (a bearer with no DPoP
+	// proof): rejected ⇒ enforcement on; accepted ⇒ the toggle is still off.
+	section("Precondition: org enforces sender-constrained tokens")
+	if st, _ := rawCheck(tokenA, "", agentA.ID); st == http.StatusUnauthorized || st == http.StatusForbidden {
+		pass("enforcement is ON (bearer without a DPoP proof is rejected, HTTP %d)", st)
+	} else {
+		fatal("enforcement is OFF (bearer without DPoP returned HTTP %d).\n"+
+			"  Enable Settings → Security → \"Require sender-constrained tokens (DPoP)\" for this org, then re-run.", st)
+	}
 
 	authedClient := agenttrust.NewClient(
 		agenttrust.WithBaseURL(baseURL),
@@ -180,42 +188,6 @@ func expectRejected(label string, status int) {
 		pass("%s ⇒ rejected (HTTP %d)", label, status)
 	} else {
 		fail("%s ⇒ NOT rejected (HTTP %d)", label, status)
-	}
-}
-
-// --- security settings (org enforcement flags) over raw HTTP ---
-
-type securitySettings struct {
-	RequireProofOfPossession      bool `json:"require_proof_of_possession"`
-	RequireSenderConstrainedTokens bool `json:"require_sender_constrained_tokens"`
-}
-
-func getSecuritySettings() securitySettings {
-	req, _ := http.NewRequest(http.MethodGet, baseURL+"/api/v1/orgs/security-settings", nil)
-	req.Header.Set("X-API-Key", adminKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fatal("read security settings: %v", err)
-	}
-	defer resp.Body.Close()
-	var s securitySettings
-	_ = json.NewDecoder(resp.Body).Decode(&s)
-	return s
-}
-
-func setSecuritySettings(pop, sct bool) {
-	body, _ := json.Marshal(securitySettings{RequireProofOfPossession: pop, RequireSenderConstrainedTokens: sct})
-	req, _ := http.NewRequest(http.MethodPut, baseURL+"/api/v1/orgs/security-settings", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", adminKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		fatal("update security settings: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		fatal("update security settings: HTTP %d %s", resp.StatusCode, b)
 	}
 }
 

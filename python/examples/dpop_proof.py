@@ -19,8 +19,10 @@ Setup (local stack):
     # even the legitimate check fails with a DPoP URL error.
     cd sdk/python && pip install -e . && python examples/dpop_proof.py
 
-The demo enables `require_sender_constrained_tokens` on the org for the run and
-restores the prior setting at the end.
+PRECONDITION: enable the org's enforcement toggle first, in the dashboard at
+Settings → Security → "Require sender-constrained tokens (DPoP)" (that setting is
+admin/session-gated, so the demo can't flip it with an API key). The demo detects
+whether it is on and tells you if it isn't.
 """
 import json
 import os
@@ -93,31 +95,6 @@ def expect_rejected(label, status):
         bad(f"{label} ⇒ NOT rejected (HTTP {status})")
 
 
-def _security_url():
-    return BASE_URL + "/api/v1/orgs/security-settings"
-
-
-def get_security_settings():
-    req = urllib.request.Request(_security_url(), headers={"X-API-Key": ADMIN_KEY})
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read() or b"{}")
-
-
-def set_security_settings(pop, sct):
-    body = json.dumps(
-        {"require_proof_of_possession": pop, "require_sender_constrained_tokens": sct}
-    ).encode()
-    req = urllib.request.Request(
-        _security_url(),
-        data=body,
-        headers={"Content-Type": "application/json", "X-API-Key": ADMIN_KEY},
-        method="PUT",
-    )
-    with urllib.request.urlopen(req) as resp:
-        if resp.status < 200 or resp.status >= 300:
-            fatal(f"update security settings: HTTP {resp.status}")
-
-
 def create_agent(client, name):
     agent = client.agents.create(name=f"{name}-{time.strftime('%H%M%S')}", framework="custom")
     if not agent.private_key:
@@ -141,68 +118,74 @@ def main():
         "    5. DPoP proof           per-request signature proving key possession on THIS call"
     )
 
-    prior = get_security_settings()
-    set_security_settings(True, True)
+    client = AgentTrustClient(base_url=BASE_URL, api_key=ADMIN_KEY)
+
+    section("Provision: register agents (steps 1–4 of the token order)")
+    agent_a = create_agent(client, "dpop-proof-A")
+    agent_b = create_agent(client, "dpop-proof-B")
+    print(f"  agent A {agent_a.id} — public key registered, private key kept locally")
+    print(f"  agent B {agent_b.id} — a second agent in the same org (for the spoof test)")
+
+    ks = InMemoryKeyStore()
+    ks.store(agent_a.id, agent_a.private_key)
+    creds = AgentCredentials(client, ks, agent_a.id, agent_a.public_key)
+    client.use_agent_credentials(creds)
+
+    token_a = creds.token()  # challenge → sign → issue, cached
+    print(f"  step 4: WIMSE token issued for A (cnf.jkt-bound): {token_a[:18]}…")
+
+    # Precondition: the org must enforce sender-constrained tokens, else the
+    # rejection proofs can't fire. Detect it behaviorally (bearer, no DPoP proof):
+    # rejected ⇒ enforcement on; accepted ⇒ the toggle is still off.
+    section("Precondition: org enforces sender-constrained tokens")
+    pre = raw_check(token_a, "", agent_a.id)
+    if pre in (401, 403):
+        ok(f"enforcement is ON (bearer without a DPoP proof is rejected, HTTP {pre})")
+    else:
+        fatal(
+            f"enforcement is OFF (bearer without DPoP returned HTTP {pre}).\n"
+            '  Enable Settings → Security → "Require sender-constrained tokens (DPoP)" '
+            "for this org, then re-run."
+        )
+
+    # PROOF 1
+    section("PROOF 1 — legitimate agent: WIMSE bearer + DPoP ⇒ accepted")
     try:
-        client = AgentTrustClient(base_url=BASE_URL, api_key=ADMIN_KEY)
+        client.actions.check(agent_id=agent_a.id, tool_name="read_file")
+        ok("check authenticated and evaluated (step 5 DPoP proof verified against cnf.jkt)")
+    except Exception as e:  # noqa: BLE001 - demo surfaces any failure
+        bad(f"legitimate check rejected: {e}")
+        print(f"  hint: if this is a DPoP URL error, run the gateway with BASE_URL={BASE_URL}")
 
-        section("Provision: register agents (steps 1–4 of the token order)")
-        agent_a = create_agent(client, "dpop-proof-A")
-        agent_b = create_agent(client, "dpop-proof-B")
-        print(f"  agent A {agent_a.id} — public key registered, private key kept locally")
-        print(f"  agent B {agent_b.id} — a second agent in the same org (for the spoof test)")
+    # PROOF 2
+    section("PROOF 2 — stolen token without the key ⇒ rejected")
+    expect_rejected("2a: replayed bearer, no DPoP proof", raw_check(token_a, "", agent_a.id))
+    attacker = generate_agent_key()
+    forged = mint_dpop_proof(attacker.private_key_pem, "POST", BASE_URL + CHECK_PATH, token_a)
+    expect_rejected(
+        "2b: bearer + DPoP signed by a different key (cnf.jkt mismatch)",
+        raw_check(token_a, forged, agent_a.id),
+    )
 
-        ks = InMemoryKeyStore()
-        ks.store(agent_a.id, agent_a.private_key)
-        creds = AgentCredentials(client, ks, agent_a.id, agent_a.public_key)
-        client.use_agent_credentials(creds)
+    # PROOF 3
+    section("PROOF 3 — body says agent B, token proves agent A ⇒ rejected")
+    try:
+        client.actions.check(agent_id=agent_b.id, tool_name="read_file")
+        bad("body agent_id spoof was ACCEPTED (identity trusted from body)")
+    except Exception as e:  # noqa: BLE001
+        ok(f"body agent_id=B with A's proof rejected — identity comes from the token: {e}")
 
-        token_a = creds.token()  # challenge → sign → issue, cached
-        print(f"  step 4: WIMSE token issued for A (cnf.jkt-bound): {token_a[:18]}…")
-
-        # PROOF 1
-        section("PROOF 1 — legitimate agent: WIMSE bearer + DPoP ⇒ accepted")
-        try:
-            client.actions.check(agent_id=agent_a.id, tool_name="read_file")
-            ok("check authenticated and evaluated (step 5 DPoP proof verified against cnf.jkt)")
-        except Exception as e:  # noqa: BLE001 - demo surfaces any failure
-            bad(f"legitimate check rejected: {e}")
-            print(f"  hint: if this is a DPoP URL error, run the gateway with BASE_URL={BASE_URL}")
-
-        # PROOF 2
-        section("PROOF 2 — stolen token without the key ⇒ rejected")
-        expect_rejected("2a: replayed bearer, no DPoP proof", raw_check(token_a, "", agent_a.id))
-        attacker = generate_agent_key()
-        forged = mint_dpop_proof(attacker.private_key_pem, "POST", BASE_URL + CHECK_PATH, token_a)
-        expect_rejected(
-            "2b: bearer + DPoP signed by a different key (cnf.jkt mismatch)",
-            raw_check(token_a, forged, agent_a.id),
-        )
-
-        # PROOF 3
-        section("PROOF 3 — body says agent B, token proves agent A ⇒ rejected")
-        try:
-            client.actions.check(agent_id=agent_b.id, tool_name="read_file")
-            bad("body agent_id spoof was ACCEPTED (identity trusted from body)")
-        except Exception as e:  # noqa: BLE001
-            ok(f"body agent_id=B with A's proof rejected — identity comes from the token: {e}")
-
-        # PROOF 4
-        section("PROOF 4 — DPoP proof replay ⇒ rejected")
-        proof = mint_dpop_proof_with_key_store(
-            ks, agent_a.id, agent_a.public_key, "POST", BASE_URL + CHECK_PATH, token_a
-        )
-        st1 = raw_check(token_a, proof, agent_a.id)
-        st2 = raw_check(token_a, proof, agent_a.id)  # same jti again
-        if 200 <= st1 < 300 and st2 in (401, 403):
-            ok(f"first use accepted (HTTP {st1}), identical proof replayed ⇒ rejected (HTTP {st2})")
-        else:
-            bad(f"replay not prevented: first={st1} second={st2} (want 2xx then 401/403)")
-    finally:
-        set_security_settings(
-            prior.get("require_proof_of_possession", False),
-            prior.get("require_sender_constrained_tokens", False),
-        )
+    # PROOF 4
+    section("PROOF 4 — DPoP proof replay ⇒ rejected")
+    proof = mint_dpop_proof_with_key_store(
+        ks, agent_a.id, agent_a.public_key, "POST", BASE_URL + CHECK_PATH, token_a
+    )
+    st1 = raw_check(token_a, proof, agent_a.id)
+    st2 = raw_check(token_a, proof, agent_a.id)  # same jti again
+    if 200 <= st1 < 300 and st2 in (401, 403):
+        ok(f"first use accepted (HTTP {st1}), identical proof replayed ⇒ rejected (HTTP {st2})")
+    else:
+        bad(f"replay not prevented: first={st1} second={st2} (want 2xx then 401/403)")
 
     banner("Result")
     if _failures == 0:

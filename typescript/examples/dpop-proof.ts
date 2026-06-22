@@ -19,8 +19,10 @@
  *   # even the legitimate check fails with a DPoP URL error.
  *   cd sdk/typescript && npm run build && npm i -D tsx && npx tsx examples/dpop-proof.ts
  *
- * The demo enables `require_sender_constrained_tokens` on the org for the run and
- * restores the prior setting at the end.
+ * PRECONDITION: enable the org's enforcement toggle first, in the dashboard at
+ * Settings → Security → "Require sender-constrained tokens (DPoP)" (that setting
+ * is admin/session-gated, so the demo can't flip it with an API key). The demo
+ * detects whether it is on and tells you if it isn't.
  */
 import {
   AgentTrustClient,
@@ -34,7 +36,6 @@ import {
 const BASE_URL = process.env.AGENTTRUST_URL || 'http://localhost:8080';
 const ADMIN_KEY = process.env.AGENTTRUST_API_KEY || '';
 const CHECK_PATH = '/api/v1/agenttrust/check';
-const SECURITY_URL = `${BASE_URL}/api/v1/orgs/security-settings`;
 
 let failures = 0;
 
@@ -48,28 +49,6 @@ const bad = (msg: string) => {
 function fatal(msg: string): never {
   console.log(`\nFATAL: ${msg}`);
   process.exit(2);
-}
-
-interface SecuritySettings {
-  require_proof_of_possession?: boolean;
-  require_sender_constrained_tokens?: boolean;
-}
-
-async function getSecuritySettings(): Promise<SecuritySettings> {
-  const resp = await fetch(SECURITY_URL, { headers: { 'X-API-Key': ADMIN_KEY } });
-  return resp.ok ? ((await resp.json()) as SecuritySettings) : {};
-}
-
-async function setSecuritySettings(pop: boolean, sct: boolean): Promise<void> {
-  const resp = await fetch(SECURITY_URL, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': ADMIN_KEY },
-    body: JSON.stringify({
-      require_proof_of_possession: pop,
-      require_sender_constrained_tokens: sct,
-    }),
-  });
-  if (!resp.ok) fatal(`update security settings: HTTP ${resp.status}`);
 }
 
 /** Simulate a non-SDK caller (attacker/replay): hand-build the request. */
@@ -116,76 +95,81 @@ async function main() {
     ].join('\n'),
   );
 
-  const prior = await getSecuritySettings();
-  await setSecuritySettings(true, true);
+  const client = new AgentTrustClient({ baseUrl: BASE_URL, apiKey: ADMIN_KEY });
+
+  section('Provision: register agents (steps 1–4 of the token order)');
+  const agentA = await createAgent(client, 'dpop-proof-A');
+  const agentB = await createAgent(client, 'dpop-proof-B');
+  console.log(`  agent A ${agentA.id} — public key registered, private key kept locally`);
+  console.log(`  agent B ${agentB.id} — a second agent in the same org (for the spoof test)`);
+
+  const ks = new MemoryKeyStore();
+  ks.store(agentA.id, agentA.privateKey!);
+  const creds = new AgentCredentials(client, ks, agentA.id, agentA.publicKey);
+  client.useAgentCredentials(creds);
+
+  const tokenA = await creds.token(); // challenge → sign → issue, cached
+  console.log(`  step 4: WIMSE token issued for A (cnf.jkt-bound): ${tokenA.slice(0, 18)}…`);
+
+  // Precondition: the org must enforce sender-constrained tokens, else the
+  // rejection proofs can't fire. Detect it behaviorally (bearer, no DPoP proof):
+  // rejected ⇒ enforcement on; accepted ⇒ the toggle is still off.
+  section('Precondition: org enforces sender-constrained tokens');
+  const pre = await rawCheck(tokenA, '', agentA.id);
+  if (pre === 401 || pre === 403) {
+    ok(`enforcement is ON (bearer without a DPoP proof is rejected, HTTP ${pre})`);
+  } else {
+    fatal(
+      `enforcement is OFF (bearer without DPoP returned HTTP ${pre}).\n` +
+        '  Enable Settings → Security → "Require sender-constrained tokens (DPoP)" for this org, then re-run.',
+    );
+  }
+
+  // PROOF 1
+  section('PROOF 1 — legitimate agent: WIMSE bearer + DPoP ⇒ accepted');
   try {
-    const client = new AgentTrustClient({ baseUrl: BASE_URL, apiKey: ADMIN_KEY });
+    await client.actions.check({ agentId: agentA.id, toolName: 'read_file' });
+    ok('check authenticated and evaluated (step 5 DPoP proof verified against cnf.jkt)');
+  } catch (e) {
+    bad(`legitimate check rejected: ${e}`);
+    console.log(`  hint: if this is a DPoP URL error, run the gateway with BASE_URL=${BASE_URL}`);
+  }
 
-    section('Provision: register agents (steps 1–4 of the token order)');
-    const agentA = await createAgent(client, 'dpop-proof-A');
-    const agentB = await createAgent(client, 'dpop-proof-B');
-    console.log(`  agent A ${agentA.id} — public key registered, private key kept locally`);
-    console.log(`  agent B ${agentB.id} — a second agent in the same org (for the spoof test)`);
+  // PROOF 2
+  section('PROOF 2 — stolen token without the key ⇒ rejected');
+  expectRejected('2a: replayed bearer, no DPoP proof', await rawCheck(tokenA, '', agentA.id));
+  const attacker = generateAgentKey();
+  const forged = mintDPoPProof(attacker.privateKeyPem, 'POST', BASE_URL + CHECK_PATH, tokenA);
+  expectRejected(
+    '2b: bearer + DPoP signed by a different key (cnf.jkt mismatch)',
+    await rawCheck(tokenA, forged, agentA.id),
+  );
 
-    const ks = new MemoryKeyStore();
-    ks.store(agentA.id, agentA.privateKey!);
-    const creds = new AgentCredentials(client, ks, agentA.id, agentA.publicKey);
-    client.useAgentCredentials(creds);
+  // PROOF 3
+  section('PROOF 3 — body says agent B, token proves agent A ⇒ rejected');
+  try {
+    await client.actions.check({ agentId: agentB.id, toolName: 'read_file' });
+    bad('body agent_id spoof was ACCEPTED (identity trusted from body)');
+  } catch (e) {
+    ok(`body agent_id=B with A's proof rejected — identity comes from the token: ${e}`);
+  }
 
-    const tokenA = await creds.token(); // challenge → sign → issue, cached
-    console.log(`  step 4: WIMSE token issued for A (cnf.jkt-bound): ${tokenA.slice(0, 18)}…`);
-
-    // PROOF 1
-    section('PROOF 1 — legitimate agent: WIMSE bearer + DPoP ⇒ accepted');
-    try {
-      await client.actions.check({ agentId: agentA.id, toolName: 'read_file' });
-      ok('check authenticated and evaluated (step 5 DPoP proof verified against cnf.jkt)');
-    } catch (e) {
-      bad(`legitimate check rejected: ${e}`);
-      console.log(`  hint: if this is a DPoP URL error, run the gateway with BASE_URL=${BASE_URL}`);
-    }
-
-    // PROOF 2
-    section('PROOF 2 — stolen token without the key ⇒ rejected');
-    expectRejected('2a: replayed bearer, no DPoP proof', await rawCheck(tokenA, '', agentA.id));
-    const attacker = generateAgentKey();
-    const forged = mintDPoPProof(attacker.privateKeyPem, 'POST', BASE_URL + CHECK_PATH, tokenA);
-    expectRejected(
-      '2b: bearer + DPoP signed by a different key (cnf.jkt mismatch)',
-      await rawCheck(tokenA, forged, agentA.id),
-    );
-
-    // PROOF 3
-    section('PROOF 3 — body says agent B, token proves agent A ⇒ rejected');
-    try {
-      await client.actions.check({ agentId: agentB.id, toolName: 'read_file' });
-      bad('body agent_id spoof was ACCEPTED (identity trusted from body)');
-    } catch (e) {
-      ok(`body agent_id=B with A's proof rejected — identity comes from the token: ${e}`);
-    }
-
-    // PROOF 4
-    section('PROOF 4 — DPoP proof replay ⇒ rejected');
-    const proof = mintDPoPProofWithKeyStore(
-      ks,
-      agentA.id,
-      agentA.publicKey,
-      'POST',
-      BASE_URL + CHECK_PATH,
-      tokenA,
-    );
-    const st1 = await rawCheck(tokenA, proof, agentA.id);
-    const st2 = await rawCheck(tokenA, proof, agentA.id); // same jti again
-    if (st1 >= 200 && st1 < 300 && (st2 === 401 || st2 === 403)) {
-      ok(`first use accepted (HTTP ${st1}), identical proof replayed ⇒ rejected (HTTP ${st2})`);
-    } else {
-      bad(`replay not prevented: first=${st1} second=${st2} (want 2xx then 401/403)`);
-    }
-  } finally {
-    await setSecuritySettings(
-      Boolean(prior.require_proof_of_possession),
-      Boolean(prior.require_sender_constrained_tokens),
-    );
+  // PROOF 4
+  section('PROOF 4 — DPoP proof replay ⇒ rejected');
+  const proof = mintDPoPProofWithKeyStore(
+    ks,
+    agentA.id,
+    agentA.publicKey,
+    'POST',
+    BASE_URL + CHECK_PATH,
+    tokenA,
+  );
+  const st1 = await rawCheck(tokenA, proof, agentA.id);
+  const st2 = await rawCheck(tokenA, proof, agentA.id); // same jti again
+  if (st1 >= 200 && st1 < 300 && (st2 === 401 || st2 === 403)) {
+    ok(`first use accepted (HTTP ${st1}), identical proof replayed ⇒ rejected (HTTP ${st2})`);
+  } else {
+    bad(`replay not prevented: first=${st1} second=${st2} (want 2xx then 401/403)`);
   }
 
   banner('Result');

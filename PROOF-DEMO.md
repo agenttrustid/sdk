@@ -53,10 +53,11 @@ export AGENTTRUST_API_KEY=sk_live_...      # admin key for the demo org
 > legitimate check fails with a DPoP URL mismatch. The scripts print a hint if
 > they detect this.
 
-The scripts enable `require_sender_constrained_tokens` (and
-`require_proof_of_possession`) on the org for the duration of the run and
-**restore the prior settings on exit** — so run them against the demo org, not a
-shared one with live agents.
+**Enable enforcement first (one click).** In the dashboard, turn on **Settings →
+Security → "Require sender-constrained tokens (DPoP)"** for the demo org. That
+setting is admin/session-gated, so the scripts can't flip it with an API key —
+instead they **detect** whether it's on and abort with instructions if it isn't.
+Do this on the demo org, not one with live agents.
 
 ---
 
@@ -153,6 +154,8 @@ dashboard app.
 
 ## Cleanup
 
-The scripts restore the org's prior enforcement settings on exit (including on
-failure). If a run is interrupted, flip the toggles back in **Settings →
-Security**, or set both back to off via `PUT /api/v1/orgs/security-settings`.
+The scripts don't change org settings — enforcement is toggled by you in the
+dashboard. When you're done, turn **Settings → Security → "Require
+sender-constrained tokens (DPoP)"** back off if you don't want it left on for the
+demo org. The demo agents it registers (`dpop-proof-A/B-…`) can be removed from
+the Agents page.
