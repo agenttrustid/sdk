@@ -45,6 +45,7 @@ import {
   ChallengeResponse,
 } from './types';
 import { generateAgentKey, KeyStore } from './keys';
+import { mintDPoPProofWithKeyStore } from './dpop';
 import {
   AgentTrustError,
   AuthenticationError,
@@ -86,7 +87,16 @@ class HttpClient {
     delete this.headers[key];
   }
 
-  async request<T>(method: string, path: string, data?: unknown): Promise<T> {
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  async request<T>(
+    method: string,
+    path: string,
+    data?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
@@ -94,7 +104,7 @@ class HttpClient {
     try {
       const response = await fetch(url, {
         method,
-        headers: this.headers,
+        headers: extraHeaders ? { ...this.headers, ...extraHeaders } : this.headers,
         body: data ? JSON.stringify(data) : undefined,
         signal: controller.signal,
       });
@@ -140,8 +150,8 @@ class HttpClient {
     return this.request<T>('GET', path);
   }
 
-  post<T>(path: string, data?: unknown): Promise<T> {
-    return this.request<T>('POST', path, data);
+  post<T>(path: string, data?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+    return this.request<T>('POST', path, data, extraHeaders);
   }
 
   put<T>(path: string, data?: unknown): Promise<T> {
@@ -387,9 +397,18 @@ export class TokensAPI {
  */
 export class ActionsAPI {
   private http: HttpClient;
+  private agentCreds?: AgentCredentials;
 
   constructor(http: HttpClient) {
     this.http = http;
+  }
+
+  /**
+   * Route runtime authorization checks through an agent's WIMSE token plus a
+   * per-request DPoP proof (sender-constrained), in addition to any org API key.
+   */
+  setAgentCredentials(ac: AgentCredentials): void {
+    this.agentCreds = ac;
   }
 
   /**
@@ -409,10 +428,11 @@ export class ActionsAPI {
       data.action_effect = request.actionEffect;
     }
 
-    const result = await this.http.post<Record<string, unknown>>(
-      '/api/v1/agenttrust/check',
-      data
-    );
+    const checkPath = '/api/v1/agenttrust/check';
+    const extraHeaders = this.agentCreds
+      ? await this.agentCreds.runtimeHeaders('POST', checkPath)
+      : undefined;
+    const result = await this.http.post<Record<string, unknown>>(checkPath, data, extraHeaders);
 
     return {
       allowed: result.allowed as boolean,
@@ -1486,6 +1506,100 @@ export class WIMSEAPI {
   }
 }
 
+/** Options for {@link AgentCredentials}. */
+export interface AgentCredentialsOptions {
+  /** WIMSE token audience. */
+  audience?: string[];
+  /** Requested WIMSE token TTL in seconds (0/undefined = server default). */
+  ttlSeconds?: number;
+}
+
+/** How long before a WIMSE token's expiry the manager proactively re-issues. */
+const CREDENTIAL_REFRESH_SKEW_MS = 60_000;
+
+/**
+ * Manages an agent's runtime authentication: auto-issues a WIMSE token via the
+ * proof-of-possession flow, caches it, refreshes it before expiry, and produces
+ * per-request `Authorization: Bearer` + `DPoP` headers. The private key never
+ * leaves the KeyStore — both the PoP signature (at issuance) and the DPoP proof
+ * (per request) are signed through it.
+ *
+ * Build it from a client, then route runtime checks through it:
+ *
+ * ```ts
+ * const ac = new AgentCredentials(client, keyStore, agentId, publicKeyPem);
+ * client.useAgentCredentials(ac);
+ * await client.actions.check({ agentId, toolName: 'read_file' });
+ * ```
+ */
+export class AgentCredentials {
+  private readonly wimse: WIMSEAPI;
+  private readonly baseUrl: string;
+  private cachedToken = '';
+  private expiresAtMs = 0;
+
+  constructor(
+    client: AgentTrustClient,
+    private readonly ks: KeyStore,
+    private readonly agentId: string,
+    private readonly publicKeyPem: string,
+    private readonly opts: AgentCredentialsOptions = {},
+  ) {
+    this.wimse = client.wimse;
+    this.baseUrl = client.getBaseUrl();
+  }
+
+  /**
+   * Returns a currently-valid WIMSE token, issuing or refreshing one via the
+   * proof-of-possession flow when the cache is empty or near expiry.
+   */
+  async token(): Promise<string> {
+    if (this.cachedToken && this.expiresAtMs - Date.now() > CREDENTIAL_REFRESH_SKEW_MS) {
+      return this.cachedToken;
+    }
+    const resp = await this.wimse.issueTokenWithProof(
+      { agentId: this.agentId, audience: this.opts.audience, ttlSeconds: this.opts.ttlSeconds },
+      this.ks,
+    );
+    this.cachedToken = resp.token;
+    this.expiresAtMs = parseTokenExpiry(resp.expiresAt);
+    return this.cachedToken;
+  }
+
+  /**
+   * Returns the headers to attach to a runtime request for the given method and
+   * request path: a Bearer WIMSE token plus a fresh DPoP proof bound to the
+   * request (htu = base URL + path) and the token (ath).
+   */
+  async runtimeHeaders(method: string, path: string): Promise<Record<string, string>> {
+    const token = await this.token();
+    const proof = mintDPoPProofWithKeyStore(
+      this.ks,
+      this.agentId,
+      this.publicKeyPem,
+      method,
+      this.baseUrl + path,
+      token,
+    );
+    return { Authorization: `Bearer ${token}`, DPoP: proof };
+  }
+
+  /** Clears the cached token, forcing a fresh issuance on the next call. */
+  invalidate(): void {
+    this.cachedToken = '';
+    this.expiresAtMs = 0;
+  }
+}
+
+/**
+ * Parses an RFC 3339 expiry to epoch ms; on failure falls back to a conservative
+ * short window so the manager re-issues soon rather than trusting a bad value.
+ */
+function parseTokenExpiry(s: string): number {
+  const ms = Date.parse(s);
+  return Number.isNaN(ms) ? Date.now() + 5 * 60_000 : ms;
+}
+
 export class AgentTrustClient {
   private http: HttpClient;
   private authHttp: HttpClient;
@@ -1534,6 +1648,19 @@ export class AgentTrustClient {
     this.sessions = new SessionsAPI(this.http);
     this.approvals = new ApprovalsAPI(this.http);
     this.wimse = new WIMSEAPI(this.http);
+  }
+
+  /** The configured gateway base URL (used as the DPoP `htu` origin). */
+  getBaseUrl(): string {
+    return this.http.getBaseUrl();
+  }
+
+  /**
+   * Route runtime authorization checks (`actions.check`) through an agent's
+   * WIMSE token plus a per-request DPoP proof, in addition to any org API key.
+   */
+  useAgentCredentials(ac: AgentCredentials): void {
+    this.actions.setAgentCredentials(ac);
   }
 
   /**

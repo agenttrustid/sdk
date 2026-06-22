@@ -49,10 +49,12 @@ export {
   SessionsAPI,
   ApprovalsAPI,
   WIMSEAPI,
+  AgentCredentials,
   primaryUrl,
   trustScore,
   TRUST_EXTENSION_URI,
 } from './client';
+export type { AgentCredentialsOptions } from './client';
 
 export {
   AgentTrustError,
