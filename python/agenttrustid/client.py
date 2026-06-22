@@ -60,7 +60,7 @@ class HTTPClient:
         """Set org API key header"""
         self.headers["X-API-Key"] = api_key
 
-    def request(self, method: str, path: str, data: dict = None) -> dict:
+    def request(self, method: str, path: str, data: dict = None, extra_headers: dict = None) -> dict:
         """Make HTTP request"""
         url = f"{self.base_url}{path}"
 
@@ -68,7 +68,8 @@ class HTTPClient:
         if data:
             body = json.dumps(data).encode("utf-8")
 
-        req = urllib.request.Request(url, data=body, headers=self.headers, method=method)
+        headers = {**self.headers, **extra_headers} if extra_headers else self.headers
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
         try:
             with urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context) as response:
@@ -115,8 +116,8 @@ class HTTPClient:
     def get(self, path: str) -> dict:
         return self.request("GET", path)
 
-    def post(self, path: str, data: dict = None) -> dict:
-        return self.request("POST", path, data)
+    def post(self, path: str, data: dict = None, extra_headers: dict = None) -> dict:
+        return self.request("POST", path, data, extra_headers)
 
     def put(self, path: str, data: dict = None) -> dict:
         return self.request("PUT", path, data)
@@ -354,6 +355,12 @@ class ActionsAPI:
 
     def __init__(self, http: HTTPClient):
         self._http = http
+        self._agent_creds = None
+
+    def set_agent_credentials(self, agent_creds) -> None:
+        """Route runtime checks through an agent's WIMSE token plus a per-request
+        DPoP proof (sender-constrained), in addition to any org API key."""
+        self._agent_creds = agent_creds
 
     def check(
         self,
@@ -397,7 +404,13 @@ class ActionsAPI:
         if action_effect:
             data["action_effect"] = action_effect
 
-        result = self._http.post("/api/v1/agenttrust/check", data)
+        check_path = "/api/v1/agenttrust/check"
+        extra_headers = (
+            self._agent_creds.runtime_headers("POST", check_path)
+            if self._agent_creds is not None
+            else None
+        )
+        result = self._http.post(check_path, data, extra_headers)
         return ActionCheckResult.from_dict(result)
 
 
@@ -706,6 +719,7 @@ class AgentTrustClient:
         self.wimse = WIMSEAPI(self._http)
 
         # Lazy-initialized protocol API instances
+        self._agent_creds = None
         self._a2a = None
         self._agent_cards = None
         self._mcp = None
@@ -714,6 +728,13 @@ class AgentTrustClient:
         self._streaming = None
         self._sessions = None
         self._approvals = None
+
+    def use_agent_credentials(self, agent_creds) -> None:
+        """Route runtime authorization checks (``actions.check``) through an
+        agent's WIMSE token plus a per-request DPoP proof, in addition to any org
+        API key. Build the credentials with :class:`AgentCredentials`."""
+        self._agent_creds = agent_creds
+        self.actions.set_agent_credentials(agent_creds)
 
     @property
     def a2a(self) -> A2AAPI:

@@ -67,6 +67,7 @@ from .dpop import (
     mint_dpop_proof,
     mint_dpop_proof_with_key_store,
 )
+from .credentials import AgentCredentials
 from .exceptions import (
     AgentTrustError,
     AuthenticationError,
@@ -118,6 +119,7 @@ __all__ = [
     "sign_with_private_key_pem",
     "mint_dpop_proof",
     "mint_dpop_proof_with_key_store",
+    "AgentCredentials",
     "AgentTrustError",
     "AuthenticationError",
     "AuthorizationError",
