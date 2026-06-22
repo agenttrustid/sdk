@@ -63,6 +63,10 @@ from .keys import (
     generate_agent_key,
     sign_with_private_key_pem,
 )
+from .dpop import (
+    mint_dpop_proof,
+    mint_dpop_proof_with_key_store,
+)
 from .exceptions import (
     AgentTrustError,
     AuthenticationError,
@@ -112,6 +116,8 @@ __all__ = [
     "KeychainKeyStore",
     "generate_agent_key",
     "sign_with_private_key_pem",
+    "mint_dpop_proof",
+    "mint_dpop_proof_with_key_store",
     "AgentTrustError",
     "AuthenticationError",
     "AuthorizationError",
