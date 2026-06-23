@@ -75,6 +75,7 @@ export {
 } from './keys';
 export type { AgentKeyPair, KeyStore } from './keys';
 export { mintDPoPProof, mintDPoPProofWithKeyStore } from './dpop';
+export { agentPublicKeyFromCard } from './agentcard';
 
 // Optional integrations (peer deps — `@langchain/core` and `ai`).
 export {

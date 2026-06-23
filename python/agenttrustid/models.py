@@ -439,6 +439,48 @@ class AgentCard:
                     return 0.0
         return 0.0
 
+    @property
+    def agent_public_key_pem(self) -> Optional[str]:
+        """The agent's registered Ed25519 public key (PKIX PEM) from the card's
+        trust extension (``ati_agent_key``), or ``None`` if the card predates the
+        proof-of-possession binding.
+
+        Pair this with a challenge (``POST /api/v1/agents/{id}/challenge``) to
+        prove the card holder controls the key the card claims. Verify the card's
+        platform JWS first — that is what makes this key authoritative.
+        """
+        extensions = []
+        if isinstance(self.capabilities, dict):
+            extensions = self.capabilities.get("extensions") or []
+        for ext in extensions:
+            if not isinstance(ext, dict) or ext.get("uri") != ATI_TRUST_EXTENSION_URI:
+                continue
+            jwk = (ext.get("params") or {}).get("ati_agent_key")
+            if not isinstance(jwk, dict):
+                return None
+            if jwk.get("kty") != "OKP" or jwk.get("crv") != "Ed25519":
+                return None
+            x = jwk.get("x")
+            if not isinstance(x, str) or not x:
+                return None
+            try:
+                import base64
+
+                from cryptography.hazmat.primitives import serialization
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                    Ed25519PublicKey,
+                )
+
+                raw = base64.urlsafe_b64decode(x + "=" * (-len(x) % 4))
+                pub = Ed25519PublicKey.from_public_bytes(raw)
+                return pub.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+                ).decode("utf-8")
+            except (ValueError, TypeError):
+                return None
+        return None
+
     @classmethod
     def from_dict(cls, data: dict) -> "AgentCard":
         data = data or {}
