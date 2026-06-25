@@ -102,6 +102,14 @@ pub enum AgentTrustError {
     /// JSON serialization or deserialization failed.
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// A cryptographic operation failed (key generation, signing, or PEM
+    /// encoding/parsing).
+    #[error("crypto error: {message}")]
+    Crypto {
+        /// Human-readable description of the failure.
+        message: String,
+    },
 }
 
 /// A type alias for `std::result::Result<T, AgentTrustError>`.

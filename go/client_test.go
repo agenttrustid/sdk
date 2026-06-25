@@ -200,6 +200,11 @@ func TestAgentsCreate(t *testing.T) {
 				http.Error(w, `{"message":"name is required"}`, http.StatusBadRequest)
 				return
 			}
+			// The SDK must register a client-generated public key, not rely on the
+			// platform to mint one.
+			if body.PublicKey == "" {
+				t.Error("expected the SDK to send a client-generated public_key, got empty")
+			}
 
 			resp := map[string]interface{}{
 				"agent": map[string]interface{}{
@@ -245,8 +250,13 @@ func TestAgentsCreate(t *testing.T) {
 	if len(agent.Capabilities) != 2 {
 		t.Errorf("expected 2 capabilities, got %d", len(agent.Capabilities))
 	}
-	if agent.PrivateKey != "-----BEGIN PRIVATE KEY-----" {
-		t.Errorf("expected PrivateKey to be set, got %q", agent.PrivateKey)
+	// The SDK generated the keypair locally, so PrivateKey is the real client key
+	// (a valid PKCS#8 PEM), not the server's stub.
+	if agent.PrivateKey == "-----BEGIN PRIVATE KEY-----" {
+		t.Error("expected the client-generated private key, got the server stub")
+	}
+	if _, err := parsePrivateKeyPEM(agent.PrivateKey); err != nil {
+		t.Errorf("agent.PrivateKey is not a valid PKCS#8 Ed25519 key: %v", err)
 	}
 }
 

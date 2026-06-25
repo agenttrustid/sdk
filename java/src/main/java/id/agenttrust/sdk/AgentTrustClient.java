@@ -167,6 +167,17 @@ public class AgentTrustClient implements AutoCloseable {
         return actions;
     }
 
+    /**
+     * Routes runtime authorization checks ({@code actions().check}) through an
+     * agent's WIMSE token plus a per-request DPoP proof, in addition to any org
+     * API key. Build the credentials with {@link AgentCredentials}.
+     *
+     * @param credentials the agent runtime credentials
+     */
+    public void useAgentCredentials(AgentCredentials credentials) {
+        actions.setAgentCredentials(credentials);
+    }
+
     /** Returns the telemetry reporting API. */
     public TelemetryAPI telemetry() {
         return telemetry;

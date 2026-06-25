@@ -78,9 +78,15 @@ impl<'a> ActionsAPI<'a> {
             action_input_summary: empty_as_none(req_copy.tool_input_summary.as_str()),
         };
 
-        let resp: ActionCheckResult =
-            self.client
-                .request("POST", "/api/v1/agenttrust/check", Some(&body))?;
+        let path = "/api/v1/agenttrust/check";
+        let resp: ActionCheckResult = match &self.client.agent_creds {
+            Some(ac) => {
+                let headers = ac.runtime_headers("POST", path)?;
+                self.client
+                    .request_with_headers("POST", path, Some(&body), &headers)?
+            }
+            None => self.client.request("POST", path, Some(&body))?,
+        };
         Ok(resp)
     }
 }

@@ -190,7 +190,11 @@ class AgentTrustClientTest {
             assertEquals("langchain", agent.getFramework());
             assertEquals("active", agent.getStatus());
             assertEquals(2, agent.getCapabilities().size());
-            assertEquals("-----BEGIN PRIVATE KEY-----", agent.getPrivateKey());
+            // The SDK generates the keypair client-side, so the private key is the
+            // real local key (a PKCS#8 PEM), not the server's stub value.
+            assertNotNull(agent.getPrivateKey());
+            assertTrue(agent.getPrivateKey().contains("BEGIN PRIVATE KEY"));
+            assertNotEquals("-----BEGIN PRIVATE KEY-----", agent.getPrivateKey());
         }
     }
 

@@ -283,6 +283,12 @@ pub struct CreateAgentRequest {
     /// Organization ID (optional, uses default org if empty).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org_id: Option<String>,
+    /// Bring-your-own Ed25519 public key (PKIX/SPKI PEM). When omitted, the SDK
+    /// generates a keypair locally at create time and registers only the public
+    /// half; the private key is returned on the resulting [`Agent`] and never
+    /// sent to the platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
 }
 
 fn default_framework() -> String {
@@ -593,6 +599,64 @@ impl AgentCard {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0)
     }
+
+    /// The agent's registered Ed25519 public key (PKIX/SPKI PEM) from the card's
+    /// trust extension (`ati_agent_key`), or `None` if the card predates the
+    /// proof-of-possession binding.
+    ///
+    /// Pair this with a challenge (`POST /api/v1/agents/{id}/challenge`) to prove
+    /// the card holder controls the key the card claims. Verify the card's
+    /// platform JWS first — that is what makes this key authoritative.
+    pub fn agent_public_key_pem(&self) -> Option<String> {
+        use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
+        use ed25519_dalek::pkcs8::spki::EncodePublicKey;
+
+        let jwk = self
+            .capabilities
+            .extensions
+            .iter()
+            .find(|e| e.uri == ATI_TRUST_EXTENSION_URI)
+            .and_then(|e| e.params.as_ref())
+            .and_then(|p| p.get("ati_agent_key"))?;
+        if jwk.get("kty").and_then(|v| v.as_str()) != Some("OKP")
+            || jwk.get("crv").and_then(|v| v.as_str()) != Some("Ed25519")
+        {
+            return None;
+        }
+        let x = jwk.get("x").and_then(|v| v.as_str())?;
+        let raw = base64url_decode(x)?;
+        let bytes: [u8; 32] = raw.try_into().ok()?;
+        let vk = ed25519_dalek::VerifyingKey::from_bytes(&bytes).ok()?;
+        vk.to_public_key_pem(LineEnding::LF).ok()
+    }
+}
+
+/// Decode an unpadded base64url string (RFC 4648 §5). Returns `None` on any
+/// non-alphabet byte. Trailing partial bits are discarded (canonical form).
+fn base64url_decode(s: &str) -> Option<Vec<u8>> {
+    let mut lut = [255u8; 256];
+    for (i, &c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        .iter()
+        .enumerate()
+    {
+        lut[c as usize] = i as u8;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for &c in s.as_bytes() {
+        let v = lut[c as usize];
+        if v == 255 {
+            return None;
+        }
+        buf = (buf << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 /// An A2A v1.0 transport interface descriptor.
@@ -1163,6 +1227,37 @@ pub struct IssueWIMSETokenRequest {
     /// Optional TTL in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u64>,
+    /// Optional audience entries the token is intended for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Vec<String>>,
+    /// Proof-of-possession over a server challenge. Prefer
+    /// [`crate::wimse::Wimse::issue_token_with_proof`], which populates this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<PoPProof>,
+}
+
+/// A proof-of-possession: an Ed25519 signature over a server-issued challenge
+/// nonce, proving the agent holds the private key matching its registered public
+/// key. A valid proof binds the issued token to that key via `cnf.jkt`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoPProof {
+    /// The single-use challenge nonce.
+    pub nonce: String,
+    /// Signing time in unix seconds.
+    pub ts: i64,
+    /// Ed25519 signature, base64url without padding.
+    pub signature: String,
+}
+
+/// Server reply to a proof-of-possession challenge.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChallengeResponse {
+    /// The single-use challenge nonce.
+    #[serde(default)]
+    pub nonce: String,
+    /// When the nonce expires (ISO 8601).
+    #[serde(default)]
+    pub expires_at: String,
 }
 
 /// Result of issuing a WIMSE workload identity token.
@@ -1316,5 +1411,47 @@ impl IssueTokenResponse {
             expires_at: self.expires_at,
             token_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod card_pop_tests {
+    use super::*;
+    use crate::keys::{generate_agent_key, parse_public_key};
+    use crate::wimse::base64url_no_pad;
+
+    #[test]
+    fn agent_public_key_pem_roundtrips() {
+        let kp = generate_agent_key().unwrap();
+        let vk = parse_public_key(&kp.public_key_pem).unwrap();
+        let x = base64url_no_pad(vk.as_bytes());
+        let json = format!(
+            r#"{{"name":"a","capabilities":{{"extensions":[{{"uri":"https://agenttrust.id/ext/trust/v1","params":{{"ati_agent_key":{{"kty":"OKP","crv":"Ed25519","x":"{x}"}}}}}}]}}}}"#
+        );
+        let card: AgentCard = serde_json::from_str(&json).unwrap();
+        let pem = card.agent_public_key_pem().expect("expected an embedded key");
+        assert_eq!(pem.trim(), kp.public_key_pem.trim());
+    }
+
+    #[test]
+    fn agent_public_key_pem_absent_is_none() {
+        // No trust extension at all.
+        let card: AgentCard = serde_json::from_str(r#"{"name":"a"}"#).unwrap();
+        assert!(card.agent_public_key_pem().is_none());
+        // Trust extension present but no ati_agent_key.
+        let legacy: AgentCard = serde_json::from_str(
+            r#"{"name":"a","capabilities":{"extensions":[{"uri":"https://agenttrust.id/ext/trust/v1","params":{"ati_trust_score":0.5}}]}}"#,
+        )
+        .unwrap();
+        assert!(legacy.agent_public_key_pem().is_none());
+    }
+
+    #[test]
+    fn agent_public_key_pem_malformed_is_none() {
+        let card: AgentCard = serde_json::from_str(
+            r#"{"name":"a","capabilities":{"extensions":[{"uri":"https://agenttrust.id/ext/trust/v1","params":{"ati_agent_key":{"kty":"OKP","crv":"Ed25519","x":"not base64!!"}}}]}}"#,
+        )
+        .unwrap();
+        assert!(card.agent_public_key_pem().is_none());
     }
 }

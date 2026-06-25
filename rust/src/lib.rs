@@ -61,10 +61,13 @@ pub mod agentcards;
 pub mod agents;
 pub mod approvals;
 pub mod client;
+pub mod credentials;
 pub mod delegations;
+pub mod dpop;
 pub mod error;
 pub mod federation;
 pub mod guard;
+pub mod keys;
 pub mod mcp;
 pub mod models;
 pub mod sessions;
@@ -81,10 +84,16 @@ pub use a2a::A2A;
 pub use agentcards::AgentCards;
 pub use approvals::ApprovalsAPI;
 pub use client::{AgentTrustClient, AgentTrustClientBuilder};
+pub use credentials::AgentCredentials;
 pub use delegations::Delegations;
+pub use dpop::{mint_dpop_proof, mint_dpop_proof_with_key_store};
 pub use error::{AgentTrustError, Result};
 pub use federation::Federation;
 pub use guard::{AgentTrustGuard, AgentTrustGuardBuilder};
+pub use keys::{
+    generate_agent_key, sign_with_private_key_pem, AgentKeyPair, InMemoryKeyStore, KeyStore,
+    KeychainBackend, KeychainKeyStore,
+};
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------

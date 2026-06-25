@@ -48,10 +48,13 @@ export {
   StreamingAPI,
   SessionsAPI,
   ApprovalsAPI,
+  WIMSEAPI,
+  AgentCredentials,
   primaryUrl,
   trustScore,
   TRUST_EXTENSION_URI,
 } from './client';
+export type { AgentCredentialsOptions } from './client';
 
 export {
   AgentTrustError,
@@ -62,6 +65,17 @@ export {
   NetworkError,
   ValidationError,
 } from './errors';
+
+// Client-side agent identity keys.
+export {
+  generateAgentKey,
+  signWithPrivateKeyPem,
+  MemoryKeyStore,
+  KeychainKeyStore,
+} from './keys';
+export type { AgentKeyPair, KeyStore } from './keys';
+export { mintDPoPProof, mintDPoPProofWithKeyStore } from './dpop';
+export { agentPublicKeyFromCard } from './agentcard';
 
 // Optional integrations (peer deps — `@langchain/core` and `ai`).
 export {
@@ -123,4 +137,10 @@ export type {
   CreateSIEMDestinationRequest,
   UpdateSIEMDestinationRequest,
   SIEMDeliveryRecord,
+  IssueWIMSETokenRequest,
+  PoPProof,
+  WIMSETokenResponse,
+  VerifyWIMSETokenRequest,
+  VerifyWIMSETokenResponse,
+  ChallengeResponse,
 } from './types';

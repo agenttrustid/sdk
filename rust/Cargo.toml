@@ -21,6 +21,13 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = tr
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
+# Client-side Ed25519 identity keys (PKIX/SPKI + PKCS#8 PEM).
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+# SHA-256 for the DPoP access-token hash (ath claim, RFC 9449).
+sha2 = "0.10"
+# OS keychain storage for KeyStore (opt-in via the `keychain` feature).
+keyring = { version = "3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
@@ -30,3 +37,5 @@ mockito = "1"
 default = ["blocking"]
 blocking = ["reqwest/blocking"]
 async = ["tokio", "reqwest/default-tls"]
+# Enable SystemKeychain (macOS Keychain / Windows Cred Manager / Linux Secret Service).
+keychain = ["dep:keyring"]

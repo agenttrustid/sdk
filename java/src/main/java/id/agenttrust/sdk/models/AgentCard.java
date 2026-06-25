@@ -3,6 +3,7 @@ package id.agenttrust.sdk.models;
 import id.agenttrust.sdk.JsonUtil;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -155,6 +156,58 @@ public class AgentCard {
             }
         }
         return 0;
+    }
+
+    // SubjectPublicKeyInfo DER prefix for an Ed25519 public key (alg id
+    // 1.3.101.112). Prepending this to the 32-byte raw key yields the same X.509
+    // encoding AgentKeys produces, so the resulting PEM round-trips.
+    private static final byte[] SPKI_ED25519_PREFIX = {
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00
+    };
+
+    /**
+     * Returns the agent's registered Ed25519 public key (PKIX/SPKI PEM) embedded
+     * in the card's trust extension as {@code ati_agent_key}, or {@code null} if
+     * the card predates the proof-of-possession binding.
+     *
+     * <p>Pair this with a challenge ({@code POST /api/v1/agents/{id}/challenge})
+     * to prove the card holder controls the key the card claims. Verify the
+     * card's platform JWS first — that is what makes this key authoritative.
+     *
+     * @return the agent's public key PEM, or {@code null} if not present/parseable
+     */
+    public String getAgentPublicKeyPem() {
+        for (Capabilities.Extension ext : capabilities.getExtensions()) {
+            if (!TRUST_EXTENSION_URI.equals(ext.getUri())) {
+                continue;
+            }
+            Map<String, Object> jwk = JsonUtil.getMap(ext.getParams(), "ati_agent_key");
+            if (jwk == null) {
+                return null;
+            }
+            if (!"OKP".equals(JsonUtil.getString(jwk, "kty"))
+                    || !"Ed25519".equals(JsonUtil.getString(jwk, "crv"))) {
+                return null;
+            }
+            String x = JsonUtil.getString(jwk, "x");
+            if (x == null || x.isEmpty()) {
+                return null;
+            }
+            try {
+                byte[] raw = Base64.getUrlDecoder().decode(x);
+                if (raw.length != 32) {
+                    return null;
+                }
+                byte[] spki = new byte[SPKI_ED25519_PREFIX.length + raw.length];
+                System.arraycopy(SPKI_ED25519_PREFIX, 0, spki, 0, SPKI_ED25519_PREFIX.length);
+                System.arraycopy(raw, 0, spki, SPKI_ED25519_PREFIX.length, raw.length);
+                String body = Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(spki);
+                return "-----BEGIN PUBLIC KEY-----\n" + body + "\n-----END PUBLIC KEY-----\n";
+            } catch (IllegalArgumentException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

@@ -79,6 +79,15 @@ final class AgentTrustHttpClient {
     }
 
     /**
+     * Sends a POST request with a JSON body plus additional per-request headers
+     * (e.g. an agent WIMSE Bearer token + DPoP proof on runtime calls).
+     */
+    Map<String, Object> post(String path, Map<String, Object> body, Map<String, String> perRequestHeaders)
+            throws AgentTrustException {
+        return request("POST", path, body, perRequestHeaders);
+    }
+
+    /**
      * Sends a POST request with no body and parses the JSON response.
      */
     Map<String, Object> post(String path) throws AgentTrustException {
@@ -137,7 +146,13 @@ final class AgentTrustHttpClient {
      */
     private Map<String, Object> request(String method, String path, Map<String, Object> body)
             throws AgentTrustException {
-        String responseBody = sendAndCheck(method, path, body);
+        return request(method, path, body, null);
+    }
+
+    private Map<String, Object> request(
+            String method, String path, Map<String, Object> body, Map<String, String> perRequestHeaders)
+            throws AgentTrustException {
+        String responseBody = sendAndCheck(method, path, body, perRequestHeaders);
 
         // Parse response body
         if (responseBody != null && !responseBody.isEmpty()) {
@@ -167,6 +182,12 @@ final class AgentTrustHttpClient {
      */
     private String sendAndCheck(String method, String path, Map<String, Object> body)
             throws AgentTrustException {
+        return sendAndCheck(method, path, body, null);
+    }
+
+    private String sendAndCheck(
+            String method, String path, Map<String, Object> body, Map<String, String> perRequestHeaders)
+            throws AgentTrustException {
         String url = baseUrl + path;
 
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
@@ -180,6 +201,12 @@ final class AgentTrustHttpClient {
 
         for (Map.Entry<String, String> e : extraHeaders.entrySet()) {
             reqBuilder.header(e.getKey(), e.getValue());
+        }
+
+        if (perRequestHeaders != null) {
+            for (Map.Entry<String, String> e : perRequestHeaders.entrySet()) {
+                reqBuilder.header(e.getKey(), e.getValue());
+            }
         }
 
         if ("GET".equals(method)) {
