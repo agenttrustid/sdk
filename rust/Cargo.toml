@@ -1,6 +1,6 @@
 [package]
 name = "agenttrustid"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "AgentTrust ID SDK — runtime authorization, opaque agent tokens, and Guardian checks for AI agents"
 license = "Apache-2.0"
