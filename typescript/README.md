@@ -240,7 +240,7 @@ await client.a2a.cancelTask(taskId);
 await client.mcp.registerServer({ name, url, capabilities? });
 await client.mcp.listServers();
 await client.mcp.removeServer(serverId);
-await client.mcp.callTool(serverId, method, params?);
+await client.mcp.callTool(serverId, agentId, method, params?, sessionId?);
 ```
 
 ### Delegations

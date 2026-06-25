@@ -408,13 +408,16 @@ describe('MCPAPI', () => {
   });
 
   it('calls a tool on a server', async () => {
-    mockFetch.mockReturnValueOnce(jsonResponse({
-      result: { files: ['a.txt', 'b.txt'] },
-    }));
+    let capturedHeaders: Record<string, string> = {};
+    mockFetch.mockImplementationOnce((url: string, init: { headers: Record<string, string> }) => {
+      capturedHeaders = { ...init.headers };
+      return jsonResponse({ result: { files: ['a.txt', 'b.txt'] } });
+    });
 
-    const result = await client.mcp.callTool('mcp-srv-1', 'list_files', { path: '/tmp' });
+    const result = await client.mcp.callTool('mcp-srv-1', 'agent-1', 'list_files', { path: '/tmp' });
 
     expect(result).toEqual({ files: ['a.txt', 'b.txt'] });
+    expect(capturedHeaders['X-Agent-ID']).toBe('agent-1');
 
     expect(mockFetch).toHaveBeenCalledWith(
       'http://localhost:8080/mcp/mcp-srv-1',

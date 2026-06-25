@@ -1077,14 +1077,32 @@ export class MCPAPI {
   }
 
   /**
-   * Call a tool on an MCP server via the AgentTrust ID proxy
+   * Call a tool on an MCP server via the AgentTrust ID proxy.
+   *
+   * The proxy authorizes the call by agent identity, so `agentId` is required and
+   * is sent as the `X-Agent-ID` header — the gateway rejects the request without
+   * it. When provided, `sessionId` is sent as `X-Session-ID` for session-scoped
+   * authorization.
+   *
+   * @param serverId  registered MCP server ID
+   * @param agentId   ID of the agent making the call (sent as X-Agent-ID; required)
+   * @param method    JSON-RPC method (e.g. "tools/call")
+   * @param params    JSON-RPC params
+   * @param sessionId optional AgentTrust session ID
    */
   async callTool(
     serverId: string,
+    agentId: string,
     method: string,
     params?: Record<string, unknown>,
     sessionId?: string
   ): Promise<unknown> {
+    if (!agentId) {
+      throw new Error(
+        'agentId is required: the MCP proxy authorizes the call by agent identity (X-Agent-ID)'
+      );
+    }
+    this.http.setHeader('X-Agent-ID', agentId);
     if (sessionId) {
       this.http.setHeader('X-Session-ID', sessionId);
     }
@@ -1103,6 +1121,7 @@ export class MCPAPI {
       }
       return result;
     } finally {
+      this.http.removeHeader('X-Agent-ID');
       if (sessionId) {
         this.http.removeHeader('X-Session-ID');
       }

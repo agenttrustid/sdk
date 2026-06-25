@@ -514,6 +514,7 @@ class TestMCPAPI(unittest.TestCase):
 
         result = self.client.mcp.call_tool(
             server_id="srv-001",
+            agent_id="agent-001",
             method="tools/call",
             params={"name": "read_file", "arguments": {"path": "/tmp/data.txt"}},
         )
@@ -539,6 +540,7 @@ class TestMCPAPI(unittest.TestCase):
 
         result = self.client.mcp.call_tool(
             server_id="srv-001",
+            agent_id="agent-001",
             method="tools/list",
         )
 

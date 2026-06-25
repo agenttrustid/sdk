@@ -224,7 +224,8 @@ impl AgentTrustClient {
     }
 
     /// Like [`request`](Self::request) but attaches additional per-request
-    /// headers (e.g. an agent WIMSE Bearer token + DPoP proof on runtime calls).
+    /// headers (e.g. an agent WIMSE Bearer token + DPoP proof on runtime calls,
+    /// or X-Agent-ID / X-Session-ID for the MCP proxy).
     pub(crate) fn request_with_headers<T: DeserializeOwned>(
         &self,
         method: &str,

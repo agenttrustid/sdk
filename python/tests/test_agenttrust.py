@@ -466,6 +466,7 @@ class TestMCPCallToolSessionID(unittest.TestCase):
 
         self.client.mcp.call_tool(
             server_id="srv-001",
+            agent_id="agent-001",
             method="tools/call",
             params={"name": "read_file"},
             session_id="sess-001",
@@ -482,6 +483,7 @@ class TestMCPCallToolSessionID(unittest.TestCase):
 
         self.client.mcp.call_tool(
             server_id="srv-001",
+            agent_id="agent-001",
             method="tools/call",
             session_id="sess-001",
         )
@@ -496,6 +498,7 @@ class TestMCPCallToolSessionID(unittest.TestCase):
 
         self.client.mcp.call_tool(
             server_id="srv-001",
+            agent_id="agent-001",
             method="tools/list",
         )
 
