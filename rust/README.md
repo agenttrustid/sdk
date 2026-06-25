@@ -243,7 +243,7 @@ agenttrustid = { version = "0.3", default-features = false, features = ["async"]
 - `get_server(id)` -- Get MCP server by ID
 - `register_server(req)` -- Register a new MCP server
 - `remove_server(id)` -- Remove an MCP server
-- `call_tool(server_id, method, params)` -- JSON-RPC proxy call
+- `call_tool(server_id, agent_id, method, params, session_id)` -- JSON-RPC proxy call
 
 ### Delegations
 

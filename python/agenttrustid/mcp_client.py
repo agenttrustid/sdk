@@ -88,6 +88,7 @@ class MCPAPI:
     def call_tool(
         self,
         server_id: str,
+        agent_id: str,
         method: str,
         params: Optional[Dict] = None,
         session_id: str = None,
@@ -96,10 +97,14 @@ class MCPAPI:
         Call a tool on an MCP server through the AgentTrust ID proxy.
 
         The proxy enforces security policies before forwarding the
-        JSON-RPC request to the target MCP server.
+        JSON-RPC request to the target MCP server. The calling agent's
+        identity is required so the proxy can authorize the action; it is
+        sent as the ``X-Agent-ID`` header.
 
         Args:
             server_id: ID of the registered MCP server
+            agent_id: ID of the agent making the call (sent as X-Agent-ID;
+                the proxy rejects the request without it)
             method: JSON-RPC method to call (e.g., "tools/call")
             params: Parameters for the method call
             session_id: AgentTrust session ID for session-scoped authorization
@@ -107,6 +112,9 @@ class MCPAPI:
         Returns:
             dict with the tool call result from the MCP server
         """
+        if not agent_id:
+            raise ValueError("agent_id is required: the MCP proxy authorizes the call by agent identity")
+        self._http.headers["X-Agent-ID"] = agent_id
         if session_id:
             self._http.headers["X-Session-ID"] = session_id
         try:
@@ -124,4 +132,5 @@ class MCPAPI:
                 return result["result"]
             return result
         finally:
+            self._http.headers.pop("X-Agent-ID", None)
             self._http.headers.pop("X-Session-ID", None)

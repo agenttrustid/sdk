@@ -97,19 +97,31 @@ public class MCPAPI {
      * Calls a tool on an MCP server via the AgentTrust ID proxy. The platform applies
      * Guardian checks to the call before forwarding it to the upstream server.
      *
+     * <p>The proxy authorizes the call by agent identity, so {@code agentId} is
+     * required and is sent as the {@code X-Agent-ID} header — the gateway rejects
+     * the request without it.
+     *
      * @param serverId  the server identifier
+     * @param agentId   ID of the agent making the call; sent as the
+     *                  {@code X-Agent-ID} header (required, non-empty)
      * @param method    the JSON-RPC method to invoke (e.g. {@code "tools/call"})
      * @param params    parameters for the JSON-RPC call (may be {@code null})
      * @param sessionId optional session ID; sent as the {@code X-Session-ID}
      *                  header for the duration of this call
      * @return the JSON-RPC {@code result} field, or the full response if no
      *         {@code result} is present
+     * @throws IllegalArgumentException if {@code agentId} is null or empty
      * @throws AgentTrustException if the request fails
      */
-    public Object callTool(String serverId, String method, Map<String, Object> params,
+    public Object callTool(String serverId, String agentId, String method, Map<String, Object> params,
                            String sessionId) throws AgentTrustException {
-        boolean setHeader = sessionId != null && !sessionId.isEmpty();
-        if (setHeader) {
+        if (agentId == null || agentId.isEmpty()) {
+            throw new IllegalArgumentException(
+                "agentId is required: the MCP proxy authorizes the call by agent identity (X-Agent-ID)");
+        }
+        httpClient.setHeader("X-Agent-ID", agentId);
+        boolean setSession = sessionId != null && !sessionId.isEmpty();
+        if (setSession) {
             httpClient.setHeader("X-Session-ID", sessionId);
         }
         try {
@@ -126,24 +138,26 @@ public class MCPAPI {
             }
             return response;
         } finally {
-            if (setHeader) {
+            httpClient.removeHeader("X-Agent-ID");
+            if (setSession) {
                 httpClient.removeHeader("X-Session-ID");
             }
         }
     }
 
     /**
-     * Convenience overload of {@link #callTool(String, String, Map, String)}
+     * Convenience overload of {@link #callTool(String, String, String, Map, String)}
      * with no session ID.
      *
      * @param serverId server identifier
+     * @param agentId  ID of the agent making the call; sent as {@code X-Agent-ID} (required)
      * @param method   JSON-RPC method
      * @param params   parameters (may be {@code null})
      * @return the JSON-RPC result
      * @throws AgentTrustException if the request fails
      */
-    public Object callTool(String serverId, String method, Map<String, Object> params)
+    public Object callTool(String serverId, String agentId, String method, Map<String, Object> params)
             throws AgentTrustException {
-        return callTool(serverId, method, params, null);
+        return callTool(serverId, agentId, method, params, null);
     }
 }

@@ -54,6 +54,8 @@ type Client struct {
 	Sessions *SessionsAPI
 	// Approvals provides AgentTrust elevation approval management.
 	Approvals *ApprovalsAPI
+	// MCP provides MCP proxy tool-calling.
+	MCP *MCPAPI
 }
 
 // Option configures the Client. Use the With* functions to create options.
@@ -132,6 +134,7 @@ func NewClient(opts ...Option) *Client {
 	c.Delegations = &DelegationsAPI{client: c}
 	c.Sessions = &SessionsAPI{client: c}
 	c.Approvals = &ApprovalsAPI{client: c}
+	c.MCP = &MCPAPI{client: c}
 
 	return c
 }
@@ -183,8 +186,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 }
 
 // doRequestWithHeaders is doRequest with additional per-request headers (e.g. an
-// agent WIMSE Bearer token + DPoP proof on runtime calls). extra overrides the
-// defaults for any key it sets.
+// agent WIMSE Bearer token + DPoP proof on runtime calls, or X-Agent-ID /
+// X-Session-ID for the MCP proxy). extra overrides the defaults for any key it sets.
 func (c *Client) doRequestWithHeaders(ctx context.Context, method, path string, body interface{}, result interface{}, extra map[string]string) error {
 	url := c.baseURL + path
 

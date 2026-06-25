@@ -312,20 +312,26 @@ describe('MCPAPI — callTool with sessionId', () => {
       return jsonResponse({ result: { content: 'ok' } });
     });
 
-    await client.mcp.callTool('srv-001', 'tools/call', { name: 'read_file' }, 'sess-001');
+    await client.mcp.callTool('srv-001', 'agent-1', 'tools/call', { name: 'read_file' }, 'sess-001');
 
+    expect(capturedHeaders['X-Agent-ID']).toBe('agent-1');
     expect(capturedHeaders['X-Session-ID']).toBe('sess-001');
   });
 
-  it('does not set X-Session-ID when sessionId not provided', async () => {
+  it('sets X-Agent-ID but not X-Session-ID when sessionId not provided', async () => {
     let capturedHeaders: Record<string, string> = {};
     mockFetch.mockImplementationOnce((url: string, init: { headers: Record<string, string> }) => {
       capturedHeaders = { ...init.headers };
       return jsonResponse({ result: {} });
     });
 
-    await client.mcp.callTool('srv-001', 'tools/list');
+    await client.mcp.callTool('srv-001', 'agent-1', 'tools/list');
 
+    expect(capturedHeaders['X-Agent-ID']).toBe('agent-1');
     expect(capturedHeaders['X-Session-ID']).toBeUndefined();
+  });
+
+  it('throws when agentId is missing', async () => {
+    await expect(client.mcp.callTool('srv-001', '', 'tools/list')).rejects.toThrow(/agentId is required/);
   });
 });
