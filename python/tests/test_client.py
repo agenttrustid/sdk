@@ -96,6 +96,76 @@ class TestAgentsAPI(unittest.TestCase):
         self.assertIn("/api/v1/agents", request.full_url)
 
     @patch('urllib.request.urlopen')
+    def test_create_agent_generates_and_registers_public_key(self, mock_urlopen):
+        """Phase 0: the SDK generates a keypair locally and registers only the public key."""
+        import json
+        mock_urlopen.return_value = MockResponse({
+            "id": "agent-1", "name": "a", "org_id": "o", "framework": "custom",
+            "public_key": "pk", "status": "active", "capabilities": [],
+        })
+
+        agent = self.client.agents.create(name="a")
+
+        body = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        self.assertTrue(body.get("public_key", "").startswith("-----BEGIN PUBLIC KEY-----"))
+        self.assertNotIn("PRIVATE KEY", body.get("public_key", ""))
+        self.assertNotIn("private_key", body)  # the private key is never sent
+        self.assertTrue(agent.private_key.startswith("-----BEGIN PRIVATE KEY-----"))
+
+    @patch('urllib.request.urlopen')
+    def test_create_agent_bring_your_own_public_key(self, mock_urlopen):
+        """When a public key is supplied, the SDK sends it and generates nothing."""
+        import json
+        from agenttrustid.keys import generate_agent_key
+        kp = generate_agent_key()
+        mock_urlopen.return_value = MockResponse({
+            "id": "agent-2", "name": "b", "org_id": "o", "framework": "custom",
+            "public_key": kp.public_key_pem, "status": "active", "capabilities": [],
+        })
+
+        agent = self.client.agents.create(name="b", public_key=kp.public_key_pem)
+
+        body = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        self.assertEqual(body.get("public_key"), kp.public_key_pem)
+        self.assertFalse(agent.private_key)  # nothing generated locally
+
+    @patch('urllib.request.urlopen')
+    def test_create_agent_with_org_id(self, mock_urlopen):
+        import json
+        mock_urlopen.return_value = MockResponse({
+            "id": "a", "name": "n", "org_id": "org-9", "framework": "custom",
+            "public_key": "pk", "status": "active", "capabilities": [],
+        })
+        self.client.agents.create(name="n", org_id="org-9")
+        body = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        self.assertEqual(body.get("org_id"), "org-9")
+
+    @patch('urllib.request.urlopen')
+    def test_list_agents_with_org_filter(self, mock_urlopen):
+        mock_urlopen.return_value = MockResponse({"agents": [
+            {"id": "a1", "name": "n1", "org_id": "o", "framework": "custom", "public_key": "p"},
+        ]})
+        agents = self.client.agents.list(org_id="o")
+        self.assertEqual(len(agents), 1)
+        self.assertIn("org_id=o", mock_urlopen.call_args[0][0].full_url)
+
+    @patch('urllib.request.urlopen')
+    def test_list_agents_non_list_result_returns_empty(self, mock_urlopen):
+        mock_urlopen.return_value = MockResponse({"unexpected": "shape"})
+        self.assertEqual(self.client.agents.list(), [])
+
+    @patch('urllib.request.urlopen')
+    def test_revoke_agent(self, mock_urlopen):
+        import json
+        mock_urlopen.return_value = MockResponse({})
+        ok = self.client.agents.revoke("agent-x", reason="compromised")
+        self.assertTrue(ok)
+        req = mock_urlopen.call_args[0][0]
+        self.assertIn("/api/v1/agents/agent-x/revoke", req.full_url)
+        body = json.loads(req.data.decode("utf-8"))
+        self.assertEqual(body.get("reason"), "compromised")
+
+    @patch('urllib.request.urlopen')
     def test_get_agent(self, mock_urlopen):
         """Test getting an agent"""
         mock_response = MockResponse({

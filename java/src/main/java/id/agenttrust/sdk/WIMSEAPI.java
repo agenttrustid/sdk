@@ -2,6 +2,8 @@ package id.agenttrust.sdk;
 
 import id.agenttrust.sdk.exceptions.AgentTrustException;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +33,55 @@ public class WIMSEAPI {
      */
     public WIMSETokenResponse issueToken(IssueWIMSETokenRequest request) throws AgentTrustException {
         Map<String, Object> result = httpClient.post("/api/v1/wimse/token", request.toJson());
+        return WIMSETokenResponse.fromJson(result);
+    }
+
+    /**
+     * Requests a single-use proof-of-possession challenge nonce for an agent.
+     *
+     * @param agentId the agent to challenge
+     * @return the challenge nonce and its expiry
+     * @throws AgentTrustException if the request fails
+     */
+    public ChallengeResponse challenge(String agentId) throws AgentTrustException {
+        Map<String, Object> result = httpClient.post("/api/v1/agents/" + agentId + "/challenge");
+        return ChallengeResponse.fromJson(result);
+    }
+
+    /**
+     * Issues a WIMSE token using proof-of-possession. Fetches a challenge for the
+     * agent, signs the canonical challenge message with the agent's key from
+     * {@code keyStore}, and issues with the proof attached, so the resulting token
+     * is bound to the agent key (cnf.jkt). Required when the org enables
+     * proof-of-possession.
+     *
+     * @param request  the issuance parameters
+     * @param keyStore the key store holding the agent's private key
+     * @return the issued token
+     * @throws AgentTrustException if the request fails
+     */
+    public WIMSETokenResponse issueTokenWithProof(IssueWIMSETokenRequest request, AgentKeys.KeyStore keyStore)
+            throws AgentTrustException {
+        if (keyStore == null) {
+            throw new IllegalArgumentException("a KeyStore is required for proof-of-possession");
+        }
+        ChallengeResponse challenge = challenge(request.agentId);
+        long ts = System.currentTimeMillis() / 1000L;
+        String audience = (request.audience == null || request.audience.isEmpty())
+                ? "" : String.join(",", request.audience);
+        // Canonical message must stay byte-identical to the server's crypto.PoPMessage:
+        // "pop-v1:<nonce>:<agentID>:<audience>:<ts>".
+        String message = "pop-v1:" + challenge.getNonce() + ":" + request.agentId + ":" + audience + ":" + ts;
+        byte[] sig = keyStore.sign(request.agentId, message.getBytes(StandardCharsets.UTF_8));
+
+        Map<String, Object> body = request.toJson();
+        Map<String, Object> proof = new LinkedHashMap<>();
+        proof.put("nonce", challenge.getNonce());
+        proof.put("ts", ts);
+        proof.put("signature", Base64.getUrlEncoder().withoutPadding().encodeToString(sig));
+        body.put("proof", proof);
+
+        Map<String, Object> result = httpClient.post("/api/v1/wimse/token", body);
         return WIMSETokenResponse.fromJson(result);
     }
 
@@ -71,12 +122,14 @@ public class WIMSEAPI {
         private final String serviceName;
         private final String environment;
         private final Integer ttlSeconds;
+        private final List<String> audience;
 
         private IssueWIMSETokenRequest(Builder b) {
             this.agentId = b.agentId;
             this.serviceName = b.serviceName;
             this.environment = b.environment;
             this.ttlSeconds = b.ttlSeconds;
+            this.audience = b.audience;
         }
 
         Map<String, Object> toJson() {
@@ -85,6 +138,7 @@ public class WIMSEAPI {
             if (serviceName != null) map.put("service_name", serviceName);
             if (environment != null) map.put("environment", environment);
             if (ttlSeconds != null) map.put("ttl_seconds", ttlSeconds);
+            if (audience != null && !audience.isEmpty()) map.put("audience", audience);
             return map;
         }
 
@@ -97,6 +151,7 @@ public class WIMSEAPI {
             private String serviceName;
             private String environment;
             private Integer ttlSeconds;
+            private List<String> audience;
 
             /** @param id agent identifier @return this */
             public Builder agentId(String id) { this.agentId = id; return this; }
@@ -106,6 +161,8 @@ public class WIMSEAPI {
             public Builder environment(String env) { this.environment = env; return this; }
             /** @param ttl TTL in seconds @return this */
             public Builder ttlSeconds(int ttl) { this.ttlSeconds = ttl; return this; }
+            /** @param aud audience entries the token is intended for @return this */
+            public Builder audience(List<String> aud) { this.audience = aud; return this; }
             /** @return the built request */
             public IssueWIMSETokenRequest build() {
                 if (agentId == null || agentId.isEmpty()) {
@@ -113,6 +170,33 @@ public class WIMSEAPI {
                 }
                 return new IssueWIMSETokenRequest(this);
             }
+        }
+    }
+
+    /** Result returned by {@link WIMSEAPI#challenge(String)}. */
+    public static class ChallengeResponse {
+        private final String nonce;
+        private final String expiresAt;
+
+        public ChallengeResponse(String nonce, String expiresAt) {
+            this.nonce = nonce;
+            this.expiresAt = expiresAt;
+        }
+
+        /** @return the single-use challenge nonce */
+        public String getNonce() { return nonce; }
+
+        /** @return when the nonce expires (ISO 8601 string) */
+        public String getExpiresAt() { return expiresAt; }
+
+        /** @param data parsed JSON
+         *  @return the parsed response */
+        public static ChallengeResponse fromJson(Map<String, Object> data) {
+            if (data == null) return null;
+            return new ChallengeResponse(
+                    JsonUtil.getString(data, "nonce"),
+                    JsonUtil.getString(data, "expires_at")
+            );
         }
     }
 

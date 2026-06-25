@@ -30,8 +30,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-# Stdlib-only at runtime; framework integrations are opt-in via extras below.
-dependencies = []
+# Identity keys require cryptography (Ed25519, PKIX/PKCS8) and the native OS
+# keychain backend uses keyring. Framework integrations are opt-in via extras.
+dependencies = [
+    "cryptography>=41.0",
+    "keyring>=24.0",
+]
 
 [project.urls]
 Homepage = "https://agenttrust.id"
@@ -52,10 +56,15 @@ agent = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio",
+    "pytest-cov",
     "black",
     "mypy",
     "ruff",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=agenttrustid --cov-report=term-missing --cov-fail-under=93"
 
 [tool.setuptools]
 license-files = ["LICENSE"]

@@ -93,6 +93,32 @@ describe('AgentsAPI', () => {
     );
   });
 
+  it('generates a keypair client-side and registers only the public key', async () => {
+    mockFetch.mockReturnValueOnce(jsonResponse({
+      agent: { id: 'a', name: 'n', org_id: 'o', framework: 'custom', status: 'active', capabilities: [] },
+    }));
+    const agent = await client.agents.create({ name: 'n' });
+    const calls = mockFetch.mock.calls;
+    const body = JSON.parse(calls[calls.length - 1][1].body);
+    expect(body.public_key).toContain('-----BEGIN PUBLIC KEY-----');
+    expect(body.private_key).toBeUndefined();
+    expect(agent.privateKey).toContain('-----BEGIN PRIVATE KEY-----');
+  });
+
+  it('uses a supplied public key without generating one', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { generateAgentKey } = require('../keys');
+    const kp = generateAgentKey();
+    mockFetch.mockReturnValueOnce(jsonResponse({
+      agent: { id: 'a', name: 'n', org_id: 'o', framework: 'custom', status: 'active', capabilities: [] },
+    }));
+    const agent = await client.agents.create({ name: 'n', publicKey: kp.publicKeyPem });
+    const calls = mockFetch.mock.calls;
+    const body = JSON.parse(calls[calls.length - 1][1].body);
+    expect(body.public_key).toBe(kp.publicKeyPem);
+    expect(agent.privateKey).toBeUndefined();
+  });
+
   it('lists agents', async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({
       agents: [

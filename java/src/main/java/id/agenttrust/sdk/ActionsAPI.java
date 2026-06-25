@@ -19,9 +19,18 @@ import java.util.Map;
 public class ActionsAPI {
 
     private final AgentTrustHttpClient httpClient;
+    private AgentCredentials agentCredentials;
 
     ActionsAPI(AgentTrustHttpClient httpClient) {
         this.httpClient = httpClient;
+    }
+
+    /**
+     * Routes runtime checks through an agent's WIMSE token plus a per-request
+     * DPoP proof (sender-constrained), in addition to any org API key.
+     */
+    void setAgentCredentials(AgentCredentials agentCredentials) {
+        this.agentCredentials = agentCredentials;
     }
 
     /**
@@ -33,7 +42,14 @@ public class ActionsAPI {
      */
     public ActionCheckResult check(ActionCheckRequest request) throws AgentTrustException {
         Map<String, Object> body = request.toJson();
-        Map<String, Object> result = httpClient.post("/api/v1/agenttrust/check", body);
+        String checkPath = "/api/v1/agenttrust/check";
+        Map<String, Object> result;
+        if (agentCredentials != null) {
+            Map<String, String> headers = agentCredentials.runtimeHeaders("POST", checkPath);
+            result = httpClient.post(checkPath, body, headers);
+        } else {
+            result = httpClient.post(checkPath, body);
+        }
         return ActionCheckResult.fromJson(result);
     }
 

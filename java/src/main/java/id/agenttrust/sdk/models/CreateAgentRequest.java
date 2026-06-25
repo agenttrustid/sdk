@@ -25,6 +25,7 @@ public class CreateAgentRequest {
     private final List<String> capabilities;
     private final Map<String, Object> metadata;
     private final String orgId;
+    private final String publicKey;
 
     private CreateAgentRequest(Builder builder) {
         this.name = builder.name;
@@ -36,6 +37,7 @@ public class CreateAgentRequest {
                 ? Collections.unmodifiableMap(new LinkedHashMap<>(builder.metadata))
                 : Collections.emptyMap();
         this.orgId = builder.orgId;
+        this.publicKey = builder.publicKey;
     }
 
     /** Agent name (required). */
@@ -63,6 +65,11 @@ public class CreateAgentRequest {
         return orgId;
     }
 
+    /** Optional caller-supplied Ed25519 public key (PKIX PEM). */
+    public String getPublicKey() {
+        return publicKey;
+    }
+
     /** Converts this request to a JSON-compatible map for serialization. */
     @SuppressWarnings("unchecked")
     public Map<String, Object> toJson() {
@@ -73,6 +80,9 @@ public class CreateAgentRequest {
         map.put("metadata", new LinkedHashMap<>(metadata));
         if (orgId != null && !orgId.isEmpty()) {
             map.put("org_id", orgId);
+        }
+        if (publicKey != null && !publicKey.isEmpty()) {
+            map.put("public_key", publicKey);
         }
         return map;
     }
@@ -89,6 +99,7 @@ public class CreateAgentRequest {
         private List<String> capabilities;
         private Map<String, Object> metadata;
         private String orgId;
+        private String publicKey;
 
         private Builder() {
         }
@@ -120,6 +131,15 @@ public class CreateAgentRequest {
         /** Sets the organization ID. */
         public Builder orgId(String orgId) {
             this.orgId = orgId;
+            return this;
+        }
+
+        /**
+         * Sets a caller-supplied Ed25519 public key (PKIX PEM). When omitted, the
+         * SDK generates a keypair and keeps the private key local.
+         */
+        public Builder publicKey(String publicKey) {
+            this.publicKey = publicKey;
             return this;
         }
 

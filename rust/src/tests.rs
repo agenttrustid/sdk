@@ -145,10 +145,83 @@ fn test_agents_create_nested_response() {
     assert_eq!(agent.framework, "langchain");
     assert_eq!(agent.status, "active");
     assert_eq!(agent.capabilities.len(), 2);
-    assert_eq!(
-        agent.private_key.as_deref(),
-        Some("-----BEGIN PRIVATE KEY-----")
-    );
+    // The private key is generated client-side, so the returned key is the real
+    // local PKCS#8 PEM — not the server's stub.
+    let pk = agent.private_key.as_deref().unwrap();
+    assert!(pk.contains("-----BEGIN PRIVATE KEY-----"));
+    assert_ne!(pk, "-----BEGIN PRIVATE KEY-----");
+    mock.assert();
+}
+
+#[test]
+fn test_agents_create_generates_and_registers_only_public_key() {
+    let mut srv = Server::new();
+
+    // Capture the request body and assert it carried a public key.
+    let mock = srv
+        .mock("POST", "/api/v1/agents")
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex("BEGIN PUBLIC KEY".to_string()),
+            Matcher::Regex("\"public_key\"".to_string()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"agent":{"id":"a","name":"n","org_id":"o","framework":"custom","status":"active","capabilities":[]}}"#,
+        )
+        .create();
+
+    let client = AgentTrustClient::builder()
+        .base_url(&srv.url())
+        .build()
+        .unwrap();
+
+    let agent = client
+        .agents()
+        .create(&CreateAgentRequest {
+            name: "n".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Private key is held locally and attached to the returned agent.
+    let pk = agent.private_key.as_deref().unwrap();
+    assert!(pk.contains("BEGIN PRIVATE KEY"));
+    // The local private key signs (its public half is verified directly in the
+    // keys.rs unit tests).
+    assert!(crate::keys::sign_with_private_key_pem(pk, b"challenge").is_ok());
+    mock.assert();
+}
+
+#[test]
+fn test_agents_create_with_supplied_public_key_does_not_generate() {
+    let mut srv = Server::new();
+    let mock = srv
+        .mock("POST", "/api/v1/agents")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"agent":{"id":"a","name":"n","org_id":"o","framework":"custom","status":"active","capabilities":[]}}"#,
+        )
+        .create();
+
+    let kp = crate::keys::generate_agent_key().unwrap();
+    let client = AgentTrustClient::builder()
+        .base_url(&srv.url())
+        .build()
+        .unwrap();
+
+    let agent = client
+        .agents()
+        .create(&CreateAgentRequest {
+            name: "n".to_string(),
+            public_key: Some(kp.public_key_pem),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Nothing was generated locally, so no private key is attached.
+    assert!(agent.private_key.is_none());
     mock.assert();
 }
 

@@ -1,5 +1,6 @@
 """AgentTrust SDK Main Client"""
 
+import base64
 import json
 import ssl
 import time
@@ -10,7 +11,11 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 
-from .models import Agent, Token, IntrospectionResult, Organization, ActionCheckResult, Session, ApprovalRequest
+from .models import (
+    Agent, Token, IntrospectionResult, Organization, ActionCheckResult, Session, ApprovalRequest,
+    WIMSETokenResponse, VerifyWIMSETokenResponse, ChallengeResponse,
+)
+from .keys import KeyStore
 from .exceptions import (
     AgentTrustError,
     AuthenticationError,
@@ -55,7 +60,7 @@ class HTTPClient:
         """Set org API key header"""
         self.headers["X-API-Key"] = api_key
 
-    def request(self, method: str, path: str, data: dict = None) -> dict:
+    def request(self, method: str, path: str, data: dict = None, extra_headers: dict = None) -> dict:
         """Make HTTP request"""
         url = f"{self.base_url}{path}"
 
@@ -63,7 +68,8 @@ class HTTPClient:
         if data:
             body = json.dumps(data).encode("utf-8")
 
-        req = urllib.request.Request(url, data=body, headers=self.headers, method=method)
+        headers = {**self.headers, **extra_headers} if extra_headers else self.headers
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
         try:
             with urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context) as response:
@@ -110,8 +116,8 @@ class HTTPClient:
     def get(self, path: str) -> dict:
         return self.request("GET", path)
 
-    def post(self, path: str, data: dict = None) -> dict:
-        return self.request("POST", path, data)
+    def post(self, path: str, data: dict = None, extra_headers: dict = None) -> dict:
+        return self.request("POST", path, data, extra_headers)
 
     def put(self, path: str, data: dict = None) -> dict:
         return self.request("PUT", path, data)
@@ -133,13 +139,17 @@ class AgentsAPI:
         org_id: str = None,
         capabilities: List[str] = None,
         metadata: Dict = None,
+        public_key: str = None,
     ) -> Agent:
         """
         Register a new agent.
 
-        The platform does not issue certificates or client-side credentials.
-        Use ``client.tokens.issue(...)`` afterwards to mint opaque ``at_`` tokens
-        for the agent.
+        By default the SDK generates an Ed25519 identity keypair locally and
+        registers only the public key; the returned ``Agent.private_key`` holds the
+        private key, which never leaves this process — store it in a KeyStore.
+        Pass ``public_key`` (PKIX PEM) to bring your own. The platform does not
+        issue certificates; use ``client.tokens.issue(...)`` afterwards to mint
+        opaque ``at_`` tokens.
 
         Args:
             name: Unique agent name within organization
@@ -147,6 +157,8 @@ class AgentsAPI:
             org_id: Organization ID (uses default if not specified)
             capabilities: List of capabilities the agent can request
             metadata: Additional metadata
+            public_key: Optional caller-supplied Ed25519 public key (PKIX PEM); when
+                omitted the SDK generates the keypair and keeps the private key local
 
         Returns:
             Agent record.
@@ -158,17 +170,35 @@ class AgentsAPI:
                 capabilities=["files:read", "web:fetch"]
             )
         """
+        from .keys import generate_agent_key
+
+        # Generate an identity keypair client-side when the caller didn't supply a
+        # public key, so the private key never leaves this process. Only the public
+        # key is registered with the platform.
+        generated_private_key_pem = None
+        pub = public_key
+        if not pub:
+            keypair = generate_agent_key()
+            pub = keypair.public_key_pem
+            generated_private_key_pem = keypair.private_key_pem
+
         data = {
             "name": name,
             "framework": framework,
             "capabilities": capabilities or [],
             "metadata": metadata or {},
+            "public_key": pub,
         }
         if org_id:
             data["org_id"] = org_id
 
         result = self._http.post("/api/v1/agents", data)
-        return Agent.from_dict(result)
+        agent = Agent.from_dict(result)
+        # When we generated the keypair locally, the private key stays here and is
+        # never round-tripped through the platform.
+        if generated_private_key_pem is not None:
+            agent.private_key = generated_private_key_pem
+        return agent
 
     def get(self, agent_id: str) -> Agent:
         """Get agent by ID"""
@@ -325,6 +355,12 @@ class ActionsAPI:
 
     def __init__(self, http: HTTPClient):
         self._http = http
+        self._agent_creds = None
+
+    def set_agent_credentials(self, agent_creds) -> None:
+        """Route runtime checks through an agent's WIMSE token plus a per-request
+        DPoP proof (sender-constrained), in addition to any org API key."""
+        self._agent_creds = agent_creds
 
     def check(
         self,
@@ -368,7 +404,13 @@ class ActionsAPI:
         if action_effect:
             data["action_effect"] = action_effect
 
-        result = self._http.post("/api/v1/agenttrust/check", data)
+        check_path = "/api/v1/agenttrust/check"
+        extra_headers = (
+            self._agent_creds.runtime_headers("POST", check_path)
+            if self._agent_creds is not None
+            else None
+        )
+        result = self._http.post(check_path, data, extra_headers)
         return ActionCheckResult.from_dict(result)
 
 
@@ -497,6 +539,102 @@ class ApprovalsAPI:
         return ApprovalRequest.from_dict(result)
 
 
+def _pop_message(nonce: str, agent_id: str, audience: str, ts: int) -> bytes:
+    """Build the canonical proof-of-possession message.
+
+    Must stay byte-identical to the server's ``crypto.PoPMessage``:
+    ``pop-v1:<nonce>:<agentID>:<audience>:<ts>`` where ``audience`` is the
+    comma-joined request audience (in request order) and ``ts`` is the signing
+    time in unix seconds.
+    """
+    return f"pop-v1:{nonce}:{agent_id}:{audience}:{ts}".encode("utf-8")
+
+
+class WIMSEAPI:
+    """WIMSE workload identity token operations.
+
+    Issues and verifies SPIFFE-style workload identity tokens (JWTs) for agents,
+    and supports proof-of-possession: an agent proves it holds its registered
+    private key by signing a server challenge, binding the issued token to that
+    key via the RFC 7800 ``cnf.jkt`` claim.
+    """
+
+    def __init__(self, http: HTTPClient):
+        self._http = http
+
+    def issue_token(
+        self,
+        agent_id: str,
+        service_name: Optional[str] = None,
+        environment: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        audience: Optional[List[str]] = None,
+        proof: Optional[dict] = None,
+    ) -> WIMSETokenResponse:
+        """Issue a WIMSE workload identity token (``POST /api/v1/wimse/token``)."""
+        data: Dict = {"agent_id": agent_id}
+        if service_name is not None:
+            data["service_name"] = service_name
+        if environment is not None:
+            data["environment"] = environment
+        if ttl_seconds is not None:
+            data["ttl_seconds"] = ttl_seconds
+        if audience:
+            data["audience"] = audience
+        if proof is not None:
+            data["proof"] = proof
+        return WIMSETokenResponse.from_dict(self._http.post("/api/v1/wimse/token", data))
+
+    def verify_token(
+        self, token: str, trust_domain_filter: Optional[str] = None
+    ) -> VerifyWIMSETokenResponse:
+        """Verify a WIMSE workload identity token (``POST /api/v1/wimse/verify``)."""
+        data: Dict = {"token": token}
+        if trust_domain_filter:
+            data["trust_domain_filter"] = trust_domain_filter
+        return VerifyWIMSETokenResponse.from_dict(self._http.post("/api/v1/wimse/verify", data))
+
+    def challenge(self, agent_id: str) -> ChallengeResponse:
+        """Request a single-use proof-of-possession challenge nonce for an agent."""
+        return ChallengeResponse.from_dict(
+            self._http.post(f"/api/v1/agents/{agent_id}/challenge")
+        )
+
+    def issue_token_with_proof(
+        self,
+        agent_id: str,
+        key_store: KeyStore,
+        service_name: Optional[str] = None,
+        environment: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        audience: Optional[List[str]] = None,
+    ) -> WIMSETokenResponse:
+        """Issue a WIMSE token using proof-of-possession.
+
+        Fetches a challenge for the agent, signs the canonical challenge message
+        with the agent's key from ``key_store``, and issues with the proof
+        attached so the resulting token is bound to the agent key (``cnf.jkt``).
+        Required when the org enables proof-of-possession.
+        """
+        challenge = self.challenge(agent_id)
+        ts = int(time.time())
+        aud_str = ",".join(audience) if audience else ""
+        signature = key_store.sign(agent_id, _pop_message(challenge.nonce, agent_id, aud_str, ts))
+        proof = {
+            "nonce": challenge.nonce,
+            "ts": ts,
+            "signature": base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii"),
+        }
+        return self.issue_token(
+            agent_id,
+            service_name=service_name,
+            environment=environment,
+            ttl_seconds=ttl_seconds,
+            audience=audience,
+            proof=proof,
+        )
+
+
 class AgentTrustClient:
     """
     AgentTrust Client - Main entry point for AgentTrust.
@@ -578,8 +716,10 @@ class AgentTrustClient:
         self.tokens = TokensAPI(self._http, self._auth_http)
         self.actions = ActionsAPI(self._auth_http)
         self.telemetry = TelemetryAPI(self._audit_http)
+        self.wimse = WIMSEAPI(self._http)
 
         # Lazy-initialized protocol API instances
+        self._agent_creds = None
         self._a2a = None
         self._agent_cards = None
         self._mcp = None
@@ -588,6 +728,13 @@ class AgentTrustClient:
         self._streaming = None
         self._sessions = None
         self._approvals = None
+
+    def use_agent_credentials(self, agent_creds) -> None:
+        """Route runtime authorization checks (``actions.check``) through an
+        agent's WIMSE token plus a per-request DPoP proof, in addition to any org
+        API key. Build the credentials with :class:`AgentCredentials`."""
+        self._agent_creds = agent_creds
+        self.actions.set_agent_credentials(agent_creds)
 
     @property
     def a2a(self) -> A2AAPI:

@@ -30,6 +30,7 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
+	agentCreds *AgentCredentials
 
 	// Agents provides agent registration and lifecycle management.
 	Agents *AgentsAPI
@@ -73,6 +74,15 @@ func WithBaseURL(url string) Option {
 func WithAPIKey(key string) Option {
 	return func(c *Client) {
 		c.apiKey = key
+	}
+}
+
+// WithAgentCredentials makes runtime authorization checks authenticate with the
+// agent's WIMSE token plus a per-request DPoP proof (sender-constrained), in
+// addition to any org API key. Build the credentials with NewAgentCredentials.
+func WithAgentCredentials(ac *AgentCredentials) Option {
+	return func(c *Client) {
+		c.agentCreds = ac
 	}
 }
 
@@ -175,9 +185,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	return c.doRequestWithHeaders(ctx, method, path, body, result, nil)
 }
 
-// doRequestWithHeaders is doRequest with additional per-request headers (e.g.
-// X-Agent-ID / X-Session-ID for the MCP proxy).
-func (c *Client) doRequestWithHeaders(ctx context.Context, method, path string, body interface{}, result interface{}, headers map[string]string) error {
+// doRequestWithHeaders is doRequest with additional per-request headers (e.g. an
+// agent WIMSE Bearer token + DPoP proof on runtime calls, or X-Agent-ID /
+// X-Session-ID for the MCP proxy). extra overrides the defaults for any key it sets.
+func (c *Client) doRequestWithHeaders(ctx context.Context, method, path string, body interface{}, result interface{}, extra map[string]string) error {
 	url := c.baseURL + path
 
 	var reqBody io.Reader
@@ -204,7 +215,7 @@ func (c *Client) doRequestWithHeaders(ctx context.Context, method, path string, 
 	if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
-	for k, v := range headers {
+	for k, v := range extra {
 		req.Header.Set(k, v)
 	}
 

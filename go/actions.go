@@ -53,7 +53,16 @@ func (a *ActionsAPI) Check(ctx context.Context, req ActionCheckRequest) (*Action
 	}
 
 	var resp ActionCheckResult
-	if err := a.client.doRequest(ctx, http.MethodPost, "/api/v1/agenttrust/check", body, &resp); err != nil {
+	const checkPath = "/api/v1/agenttrust/check"
+	var extra map[string]string
+	if a.client.agentCreds != nil {
+		h, err := a.client.agentCreds.RuntimeHeaders(ctx, http.MethodPost, checkPath)
+		if err != nil {
+			return nil, err
+		}
+		extra = h
+	}
+	if err := a.client.doRequestWithHeaders(ctx, http.MethodPost, checkPath, body, &resp, extra); err != nil {
 		return nil, err
 	}
 	return &resp, nil

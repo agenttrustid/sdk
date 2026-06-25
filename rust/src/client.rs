@@ -59,6 +59,7 @@ pub struct AgentTrustClient {
     pub(crate) http: reqwest::blocking::Client,
     pub(crate) base_url: String,
     pub(crate) api_key: Option<String>,
+    pub(crate) agent_creds: Option<crate::credentials::AgentCredentials>,
 }
 
 impl AgentTrustClient {
@@ -193,6 +194,26 @@ impl AgentTrustClient {
     }
 
     /// Perform an HTTP request that expects a JSON response body.
+    /// Clone the transport configuration into a standalone client (no agent
+    /// credentials attached), used internally so [`AgentCredentials`] can issue
+    /// tokens without a self-referential type.
+    pub(crate) fn clone_for_credentials(&self) -> AgentTrustClient {
+        AgentTrustClient {
+            http: self.http.clone(),
+            base_url: self.base_url.clone(),
+            api_key: self.api_key.clone(),
+            agent_creds: None,
+        }
+    }
+
+    /// Route runtime authorization checks (`actions().check`) through an agent's
+    /// WIMSE token plus a per-request DPoP proof, in addition to any org API key.
+    /// Build the credentials with [`AgentCredentials::new`].
+    pub fn with_agent_credentials(mut self, ac: crate::credentials::AgentCredentials) -> Self {
+        self.agent_creds = Some(ac);
+        self
+    }
+
     pub(crate) fn request<T: DeserializeOwned>(
         &self,
         method: &str,
@@ -202,14 +223,15 @@ impl AgentTrustClient {
         self.request_with_headers(method, path, body, &[])
     }
 
-    /// Perform an HTTP request with extra per-request headers, expecting a JSON
-    /// response body.
+    /// Like [`request`](Self::request) but attaches additional per-request
+    /// headers (e.g. an agent WIMSE Bearer token + DPoP proof on runtime calls,
+    /// or X-Agent-ID / X-Session-ID for the MCP proxy).
     pub(crate) fn request_with_headers<T: DeserializeOwned>(
         &self,
         method: &str,
         path: &str,
         body: Option<impl Serialize>,
-        headers: &[(&str, &str)],
+        extra_headers: &[(String, String)],
     ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
 
@@ -228,8 +250,8 @@ impl AgentTrustClient {
             req = req.header("X-API-Key", key);
         }
 
-        for (name, value) in headers {
-            req = req.header(*name, *value);
+        for (k, v) in extra_headers {
+            req = req.header(k.as_str(), v.as_str());
         }
 
         if let Some(b) = body {
@@ -372,6 +394,7 @@ impl AgentTrustClientBuilder {
             http,
             base_url: self.base_url.trim_end_matches('/').to_string(),
             api_key: self.api_key,
+            agent_creds: None,
         })
     }
 }

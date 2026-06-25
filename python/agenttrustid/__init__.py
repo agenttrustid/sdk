@@ -42,7 +42,11 @@ from .models import (
     VerifyFederatedTokenResult,
     SIEMDestination,
     SIEMDeliveryRecord,
+    WIMSETokenResponse,
+    VerifyWIMSETokenResponse,
+    ChallengeResponse,
 )
+from .client import WIMSEAPI
 from .a2a import A2AAPI
 from .agentcard import AgentCardsAPI
 from .mcp_client import MCPAPI
@@ -51,6 +55,19 @@ from .federation import FederationAPI
 from .streaming import StreamingAPI
 from .client import SessionsAPI, ApprovalsAPI
 from .guard import AgentTrustGuard
+from .keys import (
+    AgentKeyPair,
+    KeyStore,
+    InMemoryKeyStore,
+    KeychainKeyStore,
+    generate_agent_key,
+    sign_with_private_key_pem,
+)
+from .dpop import (
+    mint_dpop_proof,
+    mint_dpop_proof_with_key_store,
+)
+from .credentials import AgentCredentials
 from .exceptions import (
     AgentTrustError,
     AuthenticationError,
@@ -82,6 +99,10 @@ __all__ = [
     "VerifyFederatedTokenResult",
     "SIEMDestination",
     "SIEMDeliveryRecord",
+    "WIMSETokenResponse",
+    "VerifyWIMSETokenResponse",
+    "ChallengeResponse",
+    "WIMSEAPI",
     "A2AAPI",
     "AgentCardsAPI",
     "MCPAPI",
@@ -90,6 +111,15 @@ __all__ = [
     "StreamingAPI",
     "SessionsAPI",
     "ApprovalsAPI",
+    "AgentKeyPair",
+    "KeyStore",
+    "InMemoryKeyStore",
+    "KeychainKeyStore",
+    "generate_agent_key",
+    "sign_with_private_key_pem",
+    "mint_dpop_proof",
+    "mint_dpop_proof_with_key_store",
+    "AgentCredentials",
     "AgentTrustError",
     "AuthenticationError",
     "AuthorizationError",

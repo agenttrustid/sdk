@@ -90,6 +90,50 @@ class WIMSEAPITest {
     }
 
     @Test
+    void testIssueTokenWithProof() throws Exception {
+        AgentKeys.AgentKeyPair kp = AgentKeys.generateAgentKey();
+        AgentKeys.InMemoryKeyStore ks = new AgentKeys.InMemoryKeyStore();
+        ks.store("a1", kp.privateKeyPem());
+
+        final String nonce = "server-nonce-xyz";
+        final Map<String, Object>[] received = new Map[]{null};
+
+        handlers.put("/api/v1/agents/a1/challenge", ex ->
+                jsonResponse(ex, 200,
+                        "{\"nonce\":\"" + nonce + "\",\"expires_at\":\"2026-12-31T00:00:00Z\"}"));
+        handlers.put("/api/v1/wimse/token", ex -> {
+            received[0] = JsonUtil.parse(readBody(ex));
+            jsonResponse(ex, 200,
+                    "{\"token\":\"eyJ.bound\",\"trust_domain\":\"acme.com\"}");
+        });
+
+        try (AgentTrustClient client = startServer()) {
+            WIMSEAPI.WIMSETokenResponse resp = client.wimse().issueTokenWithProof(
+                    WIMSEAPI.IssueWIMSETokenRequest.builder()
+                            .agentId("a1")
+                            .audience(java.util.List.of("https://api.example.com"))
+                            .build(),
+                    ks);
+            assertEquals("eyJ.bound", resp.getToken());
+        }
+
+        assertNotNull(received[0], "server did not receive a request");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> proof = (Map<String, Object>) received[0].get("proof");
+        assertNotNull(proof, "request carried no proof");
+        assertEquals(nonce, proof.get("nonce"));
+
+        long ts = ((Number) proof.get("ts")).longValue();
+        String message = "pop-v1:" + nonce + ":a1:https://api.example.com:" + ts;
+        byte[] sig = java.util.Base64.getUrlDecoder().decode((String) proof.get("signature"));
+
+        java.security.Signature verifier = java.security.Signature.getInstance("Ed25519");
+        verifier.initVerify(AgentKeys.parsePublicKey(kp.publicKeyPem()));
+        verifier.update(message.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertTrue(verifier.verify(sig), "proof signature must verify against canonical message");
+    }
+
+    @Test
     void testVerifyTokenValid() throws AgentTrustException {
         handlers.put("/api/v1/wimse/verify", ex ->
                 jsonResponse(ex, 200,

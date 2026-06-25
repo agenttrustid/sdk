@@ -167,9 +167,9 @@ impl<'a> Mcp<'a> {
             method,
             params: params.as_ref(),
         };
-        let mut headers: Vec<(&str, &str)> = vec![("X-Agent-ID", agent_id)];
+        let mut headers: Vec<(String, String)> = vec![("X-Agent-ID".to_string(), agent_id.to_string())];
         if let Some(sid) = session_id {
-            headers.push(("X-Session-ID", sid));
+            headers.push(("X-Session-ID".to_string(), sid.to_string()));
         }
         let resp: Value = self
             .client
